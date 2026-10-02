@@ -10,28 +10,35 @@ from superkraken.config import settings
 from superkraken.state import PortfolioState
 
 
-def render_ascii_curve(values: List[float], height: int = 4, width: int = 24) -> str:
+def render_ascii_curve(values: List[float], height: int = 4, width: int = 22) -> str:
     """Render a multi-row stepped ASCII equity curve with threshold labels."""
     if not values:
         return "Equity curve standby..."
     pts = values[-width:]
-    if len(pts) < 2:
-        pts = [pts[0]] * width
-
     min_v = min(pts)
     max_v = max(pts)
-    if min_v == max_v:
-        max_v = min_v + 10.0
-        min_v = min_v - 10.0
+
+    lines = ["Equity Curve (last 20 cycles):"]
+
+    # Flat baseline when no variance or single cycle
+    if len(pts) < 2 or max_v == min_v:
+        curr_val = pts[-1]
+        for h in range(height - 1, -1, -1):
+            if h == 1:
+                lines.append(f"${curr_val:>6,.0f} ┤ " + "─" * (width - 2))
+            elif h == 0:
+                lines.append("        ┼─" + "─" * (width - 2))
+            else:
+                lines.append("        │ " + " " * (width - 2))
+        return "\n".join(lines)
 
     step = (max_v - min_v) / (height - 1) if height > 1 else 1.0
 
-    # Resample or pad points to match target width
+    # Pad points to match target width
     if len(pts) < width:
         pts = [pts[0]] * (width - len(pts)) + pts
 
     row_pts = [int(round((v - min_v) / (max_v - min_v) * (height - 1))) for v in pts]
-
     grid = [[" " for _ in range(width)] for _ in range(height)]
 
     for c in range(width):
@@ -46,13 +53,11 @@ def render_ascii_curve(values: List[float], height: int = 4, width: int = 24) ->
                 grid[inter][c] = "│"
             grid[curr_r][c] = "╯"
         else:
-            grid[prev_r][c] = "╰"
+            grid[prev_r][c] = "╭"
             for inter in range(curr_r + 1, prev_r):
                 grid[inter][c] = "│"
-            grid[curr_r][c] = "╮"
+            grid[prev_r][c] = "╯"
 
-    lines = []
-    lines.append("Equity Curve (last 20 cycles):")
     for h in range(height - 1, -1, -1):
         thresh = min_v + h * step
         lbl = f"${thresh:>6,.0f} ┤" if h > 0 else f"${thresh:>6,.0f} ┼"

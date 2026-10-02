@@ -41,3 +41,12 @@ async def test_tui_app_mount():
         # Verify portfolio sparkline history
         assert len(app.portfolio_widget.equity_history) >= 1
 
+        # Verify debate log scroll actions and focusability
+        assert app.debate_log.can_focus is True
+        for i in range(30):
+            app.debate_log.add_log(f"Agent {i}", f"Test scroll message line {i}", "white")
+        app.action_scroll_debate_up()
+        app.action_scroll_debate_pageup()
+        app.action_scroll_debate_down()
+        app.action_scroll_debate_pagedown()
+

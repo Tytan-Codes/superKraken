@@ -59,7 +59,7 @@ class SuperKrakenTUI(App):
         padding: 0 1;
     }
     #top-grid {
-        height: 14;
+        height: 18;
         layout: grid;
         grid-size: 3 1;
         grid-columns: 1fr 1fr 1fr;
@@ -71,6 +71,9 @@ class SuperKrakenTUI(App):
         height: 100%;
         margin: 0 1;
         padding: 0;
+        overflow-y: auto;
+        scrollbar-size-vertical: 1;
+        scrollbar-color: #3b82f6;
     }
     #middle-debate {
         height: 1fr;
@@ -98,6 +101,10 @@ class SuperKrakenTUI(App):
         ("r", "show_region", "Region Info"),
         ("d", "force_debate", "Force Debate"),
         ("b", "trigger_backtest", "Backtest"),
+        ("pageup", "scroll_debate_pageup", "Page Up"),
+        ("pagedown", "scroll_debate_pagedown", "Page Down"),
+        ("up", "scroll_debate_up", "Scroll Up"),
+        ("down", "scroll_debate_down", "Scroll Down"),
     ]
 
     def __init__(self, mode: str = "PAPER"):
@@ -216,6 +223,18 @@ class SuperKrakenTUI(App):
     async def action_trigger_backtest(self) -> None:
         self.debate_log.add_log("📈 Backtest", "Run 'trader backtest BTC/USD 30d' in CLI for full strategy verification.", "yellow")
         self.notifications_bar.add_event("Backtest reminder: run trader backtest", "info")
+
+    def action_scroll_debate_pageup(self) -> None:
+        self.debate_log.scroll_page_up()
+
+    def action_scroll_debate_pagedown(self) -> None:
+        self.debate_log.scroll_page_down()
+
+    def action_scroll_debate_up(self) -> None:
+        self.debate_log.scroll_up()
+
+    def action_scroll_debate_down(self) -> None:
+        self.debate_log.scroll_down()
 
     async def autonomous_trading_loop(self) -> None:
         """Main multi-agent decision cycle across watchlisted symbols."""
