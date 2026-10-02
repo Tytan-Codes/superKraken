@@ -40,8 +40,10 @@ class BullishResearcherAgent(BaseAgent):
         analyst_reports: List[AnalystReport],
     ) -> ResearcherArgument:
         reports_summary = []
-        for r in analyst_reports:
-            ind_text = f" Indicators: {r.indicators}" if r.indicators else ""
+        for r in (analyst_reports or []):
+            if not r:
+                continue
+            ind_text = f" Indicators: {r.indicators}" if getattr(r, "indicators", None) else ""
             reports_summary.append(
                 f"- {r.agent_name}: Signal={r.signal.value}, Conf={r.confidence:.2f},{ind_text} Summary: {r.summary}"
             )

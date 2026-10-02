@@ -171,7 +171,7 @@ class Database:
                     """,
                     (limit,),
                 )
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in (cursor.fetchall() or [])]
 
     def get_today_trade_count(self, symbol: Optional[str] = None) -> int:
         with self._get_connection() as conn:
@@ -224,7 +224,7 @@ class Database:
                     """,
                     (limit,),
                 )
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in (cursor.fetchall() or [])]
 
 
 db = Database()

@@ -39,7 +39,7 @@ risk_agent = RiskManagerAgent()
 async def technical_analyst_node(state: TradingDeskState) -> Dict[str, Any]:
     symbol = state["symbol"]
     current_price = state["current_price"]
-    candles = [Candle.model_validate(c) for c in state.get("candles", [])]
+    candles = [Candle.model_validate(c) for c in (state.get("candles") or [])]
     indicators = compute_all_indicators(candles)
 
     report = await technical_agent.analyze(symbol, current_price, indicators, recent_candles=candles)
@@ -53,7 +53,7 @@ async def technical_analyst_node(state: TradingDeskState) -> Dict[str, Any]:
 async def sentiment_analyst_node(state: TradingDeskState) -> Dict[str, Any]:
     symbol = state["symbol"]
     current_price = state["current_price"]
-    sentiment_ctx = state.get("market_sentiment")
+    sentiment_ctx = state.get("market_sentiment") or {}
 
     report = await sentiment_agent.analyze(symbol, current_price, sentiment_ctx)
     return {
@@ -65,7 +65,7 @@ async def sentiment_analyst_node(state: TradingDeskState) -> Dict[str, Any]:
 async def fundamental_analyst_node(state: TradingDeskState) -> Dict[str, Any]:
     symbol = state["symbol"]
     current_price = state["current_price"]
-    order_book = state.get("order_book")
+    order_book = state.get("order_book") or {}
 
     report = await fundamental_agent.analyze(symbol, current_price, order_book)
     return {
@@ -80,8 +80,9 @@ async def bull_researcher_node(state: TradingDeskState) -> Dict[str, Any]:
 
     reports = []
     for key in ["technical_report", "sentiment_report", "fundamental_report"]:
-        if state.get(key):
-            reports.append(AnalystReport.model_validate(state[key]))
+        val = state.get(key)
+        if val is not None:
+            reports.append(AnalystReport.model_validate(val))
 
     argument = await bull_agent.research(symbol, current_price, reports)
     return {
@@ -96,8 +97,9 @@ async def bear_researcher_node(state: TradingDeskState) -> Dict[str, Any]:
 
     reports = []
     for key in ["technical_report", "sentiment_report", "fundamental_report"]:
-        if state.get(key):
-            reports.append(AnalystReport.model_validate(state[key]))
+        val = state.get(key)
+        if val is not None:
+            reports.append(AnalystReport.model_validate(val))
 
     argument = await bear_agent.research(symbol, current_price, reports)
     return {
@@ -116,7 +118,7 @@ async def debate_consensus_node(state: TradingDeskState) -> Dict[str, Any]:
     consensus, rounds = await debate_agent.adjudicate(symbol, current_price, bull, bear)
     return {
         "consensus": consensus.model_dump(mode="json"),
-        "debate_rounds": [r.model_dump(mode="json") for r in rounds],
+        "debate_rounds": [r.model_dump(mode="json") for r in (rounds or [])],
         "agent_states": {"debate": "COMPLETED"},
     }
 
@@ -125,7 +127,7 @@ async def execution_trader_node(state: TradingDeskState) -> Dict[str, Any]:
     symbol = state["symbol"]
     current_price = state["current_price"]
     consensus = ConsensusResult.model_validate(state["consensus"])
-    portfolio = PortfolioState.model_validate(state.get("portfolio", {}))
+    portfolio = PortfolioState.model_validate(state.get("portfolio") or {})
 
     proposal = await trader_agent.propose_trade(symbol, current_price, consensus, portfolio)
     return {
@@ -136,7 +138,7 @@ async def execution_trader_node(state: TradingDeskState) -> Dict[str, Any]:
 
 async def risk_manager_node(state: TradingDeskState) -> Dict[str, Any]:
     proposal = TradeProposal.model_validate(state["proposal"])
-    portfolio = PortfolioState.model_validate(state.get("portfolio", {}))
+    portfolio = PortfolioState.model_validate(state.get("portfolio") or {})
 
     evaluation = await risk_agent.audit_trade(proposal, portfolio)
     return {

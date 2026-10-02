@@ -198,3 +198,7 @@ class TradingDeskState(TypedDict, total=False):
     messages: List[Dict[str, str]]
     agent_states: Annotated[Dict[str, str], merge_dicts]
     error: Optional[str]
+
+
+# Alias TradingState for backward compatibility with debug scripts
+TradingState = TradingDeskState

@@ -1315,7 +1315,7 @@ def test_safety():
             status="FILLED",
             message=f"Stop-loss hit: -$120.00 loss",
         )
-        db.log_trade(fake_loss, confidence=1.0, reasoning=f"Simulated consecutive loss {i} (Stop-loss hit)")
+        db.log_trade(fake_loss, confidence=1.0, reasoning=f"Simulated consecutive loss {i} (Stop-loss hit)", session_type="TEST")
 
     engine3 = PaperTradingEngine()
     engine3.portfolio.cash_usd = 10000.0
@@ -1423,7 +1423,7 @@ def test_circuit_breaker():
     engine.portfolio.daily_drawdown_pct = 0.11
 
     now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", f"Daily loss exceeded 10% threshold at {now_iso}")
+    db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", f"Daily loss exceeded 10% threshold at {now_iso}", session_type="TEST")
 
     console.print("[bold red]🔴 [CIRCUIT BREAKER TRIGGERED] Daily loss exceeded 10% threshold[/bold red]")
     console.print("[bold red]🔴 All agent loops HALTED[/bold red]")
@@ -1521,7 +1521,7 @@ def test_memory():
             message=f"Memory test trade: {kind}",
             pnl_usd=pnl,
         )
-        db.log_trade(res, confidence=0.75, reasoning=f"Memory test {kind}")
+        db.log_trade(res, confidence=0.75, reasoning=f"Memory test {kind}", session_type="TEST")
 
     console.print("[bold yellow]🛡️  [MEMORY: SIZING TIGHTENED][/bold yellow]")
     console.print("📊 Last 5 trades: [bold red]LOSS[/bold red], [bold red]LOSS[/bold red], [bold red]LOSS[/bold red], [bold green]WIN[/bold green], [bold red]LOSS[/bold red]")

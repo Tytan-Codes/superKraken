@@ -1,6 +1,6 @@
 """Textual widget for portfolio balances, open positions, and ASCII equity curve."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -10,14 +10,17 @@ from superkraken.config import settings
 from superkraken.state import PortfolioState
 
 
-def render_ascii_curve(values: List[float], height: int = 4, width: int = 24) -> str:
+def render_ascii_curve(values: Optional[List[float]], height: int = 4, width: int = 24) -> str:
     if not values:
         return "Equity curve standby..."
-    if len(values) <= 1:
-        v0 = values[0]
+    val_list = [v for v in (values or []) if v is not None]
+    if not val_list:
+        return "Equity curve standby..."
+    if len(val_list) <= 1:
+        v0 = val_list[0]
         return f"Equity Curve (cycle 1 standby):\n${v0:>6,.0f} ┼" + ("─" * (width - 2))
 
-    pts = values[-width:]
+    pts = val_list[-width:]
     min_v = min(pts)
     max_v = max(pts)
     if min_v == max_v:
@@ -89,9 +92,12 @@ class PortfolioWidget(Static):
             Text("0.00%", style="dim"),
         )
 
-        for sym, pos in self.portfolio.positions.items():
-            pnl_pct = pos.unrealized_pnl_pct * 100
-            pnl_usd = pos.unrealized_pnl
+        positions = getattr(self.portfolio, "positions", {}) or {}
+        for sym, pos in positions.items():
+            if not pos:
+                continue
+            pnl_pct = (pos.unrealized_pnl_pct or 0.0) * 100
+            pnl_usd = pos.unrealized_pnl or 0.0
             style = "bold green" if pnl_pct >= 0 else "bold red"
             sign = "+" if pnl_pct >= 0 else ""
             pnl_text = f"{sign}${pnl_usd:,.2f} ({sign}{pnl_pct:.1f}%)"

@@ -272,4 +272,50 @@ class BaseAgent:
                 setattr(obj, "is_fallback", True)
             return obj
         except Exception:
-            raise NotImplementedError(f"Heuristic fallback must be implemented for {self.name} with {schema}")
+            # Safe default fallback object if schema cannot be initialized empty
+            try:
+                from superkraken.state import TradeAction
+                fields = {}
+                for fname, finfo in getattr(schema, "model_fields", {}).items():
+                    if finfo.annotation in (float, int):
+                        fields[fname] = 0.0
+                    elif finfo.annotation == str:
+                        fields[fname] = f"[HEURISTIC FALLBACK] {self.name}"
+                    elif finfo.annotation == TradeAction:
+                        fields[fname] = TradeAction.HOLD
+                    elif finfo.annotation == bool:
+                        fields[fname] = False
+                    elif getattr(finfo.annotation, "__origin__", None) in (list, List):
+                        fields[fname] = []
+                    elif getattr(finfo.annotation, "__origin__", None) in (dict, Dict):
+                        fields[fname] = {}
+                obj = schema.model_validate(fields)
+                if hasattr(obj, "is_fallback"):
+                    setattr(obj, "is_fallback", True)
+                return obj
+            except Exception:
+                raise NotImplementedError(f"Heuristic fallback must be implemented for {self.name} with {schema}")
+
+    async def safe_invoke(self, state: Any) -> Any:
+        """Defensive wrapper catching None returns and TypeError NoneType iteration errors."""
+        try:
+            if hasattr(self, "invoke"):
+                result = await self.invoke(state)
+            elif hasattr(self, "analyze"):
+                result = await self.analyze(state)
+            else:
+                result = None
+
+            if result is None:
+                logger.warning(
+                    f"[{self.__class__.__name__}] returned None — applying safe fallback"
+                )
+                return self._heuristic_fallback(str(state), None)
+            return result
+        except TypeError as e:
+            if "NoneType" in str(e) and "iterable" in str(e):
+                logger.error(
+                    f"[{self.__class__.__name__}] NoneType iterable error: {e} — applying fallback"
+                )
+                return self._heuristic_fallback(str(state), None)
+            raise

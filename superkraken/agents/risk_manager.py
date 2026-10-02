@@ -5,7 +5,7 @@ daily drawdown circuit breakers, and overtrading caps.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 from superkraken.agents.base import BaseAgent
 from superkraken.config import settings
 from superkraken.state import PortfolioState, RiskEvaluation, TradeAction, TradeProposal
@@ -112,7 +112,9 @@ class RiskManagerAgent(BaseAgent):
         from superkraken.storage.database import db
         history = recent_trades if recent_trades is not None else db.get_recent_trades(limit=5)
         consecutive_losses = 0
-        for t in history:
+        for t in (history or []):
+            if not t:
+                continue
             msg = (t.get("message") or "").lower()
             reason = (t.get("reasoning") or "").lower()
             status = (t.get("status") or "").lower()
@@ -205,4 +207,18 @@ class RiskManagerAgent(BaseAgent):
             except Exception as e:
                 logger.warning(f"Qualitative risk audit call failed: {e}")
         return math_eval
+
+    def _heuristic_fallback(self, context: str, schema: Optional[Type[RiskEvaluation]] = None) -> RiskEvaluation:
+        """Deterministic fallback risk evaluation."""
+        return RiskEvaluation(
+            approved=False,
+            adjusted_quantity=0.0,
+            adjusted_position_pct=0.0,
+            stop_loss_price=0.0,
+            reasons=["[HEURISTIC FALLBACK] Safe rejection by Risk Manager rules."],
+            drawdown_pct=0.0,
+            trades_today=0,
+            circuit_breaker_triggered=False,
+            model_used="heuristic-rules",
+        )
 

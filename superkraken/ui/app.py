@@ -148,7 +148,7 @@ class SuperKrakenTUI(App):
     async def action_emergency_stop(self) -> None:
         self.debate_log.add_log("🚨 EMERGENCY", "Flattening all positions & canceling orders!", "bold red")
         self.notifications_bar.add_event("Emergency Stop: Flattening positions", "warn")
-        prices = {s: d["price"] for s, d in self.price_feed.prices.items()}
+        prices = {s: d["price"] for s, d in (self.price_feed.prices or {}).items() if d and "price" in d}
         results = self.paper_engine.flatten_all_positions(prices)
         self.portfolio_widget.update_portfolio(self.paper_engine.portfolio)
         self.top_header.update_value(self.paper_engine.portfolio.total_value_usd)
@@ -188,7 +188,7 @@ class SuperKrakenTUI(App):
         self._confirming_kill = False
         self.debate_log.add_log("🚨 KILL SWITCH", "CRITICAL: ALL AGENTS HALTED. LIQUIDATING PORTFOLIO.", "bold red")
         self.notifications_bar.add_event("🚨 KILL SWITCH ACTIVATED: ALL SYSTEMS HALTED", "warn")
-        prices = {s: d["price"] for s, d in self.price_feed.prices.items()}
+        prices = {s: d["price"] for s, d in (self.price_feed.prices or {}).items() if d and "price" in d}
         results = self.paper_engine.flatten_all_positions(prices)
         self.portfolio_widget.update_portfolio(self.paper_engine.portfolio)
         self.top_header.update_value(self.paper_engine.portfolio.total_value_usd)
@@ -253,9 +253,11 @@ class SuperKrakenTUI(App):
                         })
 
                         # Update open positions valuation in paper engine
-                        all_prices = {s: d["price"] for s, d in self.price_feed.prices.items()}
+                        all_prices = {s: d["price"] for s, d in (self.price_feed.prices or {}).items() if d and "price" in d}
                         triggered_orders = self.paper_engine.update_market_prices(all_prices)
-                        for trig in triggered_orders:
+                        for trig in (triggered_orders or []):
+                            if not trig:
+                                continue
                             if "stop-loss" in trig.message.lower() or "stop" in trig.message.lower():
                                 pnl_pct = (trig.filled_price - trig.price) / trig.price * 100 if trig.price > 0 else -3.2
                                 self.notifications_bar.add_event(
@@ -301,7 +303,7 @@ class SuperKrakenTUI(App):
                         initial_state = {
                             "symbol": symbol,
                             "current_price": current_price,
-                            "candles": [c.model_dump() for c in candles],
+                            "candles": [c.model_dump() for c in (candles or [])],
                             "market_sentiment": {
                                 "fear_greed_index": 68,
                                 "sentiment_label": "Greed",
@@ -415,7 +417,8 @@ class SuperKrakenTUI(App):
                             r_app = risk_eval.get("approved", False)
                             r_style = "bold green" if r_app else "bold red"
                             r_text = "APPROVED" if r_app else "REJECTED"
-                            r_reasons = " | ".join(risk_eval.get("reasons", [])) or "Risk parameters satisfied"
+                            reasons_list = risk_eval.get("reasons") or []
+                            r_reasons = " | ".join(reasons_list) or "Risk parameters satisfied"
                             self.debate_log.add_log(
                                 "🛡️ Risk Manager",
                                 f"{r_text}: {r_reasons[:85]}",
@@ -426,7 +429,9 @@ class SuperKrakenTUI(App):
 
                         # Memory layer consecutive losses notification
                         if risk_eval:
-                            for reason in risk_eval.get("reasons", []):
+                            for reason in (risk_eval.get("reasons") or []):
+                                if not reason:
+                                    continue
                                 if "consecutive losses" in reason.lower() or "tightened" in reason.lower():
                                     self.debate_log.add_log(
                                         "🛡️ Risk Manager",

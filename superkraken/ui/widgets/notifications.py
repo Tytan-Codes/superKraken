@@ -42,12 +42,13 @@ class NotificationsBarWidget(Static):
     def render(self) -> Text:
         ticker = Text()
         ticker.append(" 🔔 ", style="bold gold1")
-        if not self.events:
+        events_list = list(getattr(self, "events", None) or [])
+        if not events_list:
             ticker.append("Desk monitoring live market feeds...", style="dim")
             return ticker
 
         items = []
-        for msg in list(self.events)[-self.max_items:]:
+        for msg in events_list[-self.max_items:]:
             if "🚨" in msg or "🔴" in msg or "circuit" in msg.lower() or "stop-loss" in msg.lower():
                 style = "bold red"
             elif "🟢" in msg or "filled" in msg.lower() or "buy" in msg.lower():
@@ -63,7 +64,7 @@ class NotificationsBarWidget(Static):
 
             items.append(Text(msg, style=style))
 
-        for i, it in enumerate(items):
+        for i, it in enumerate(items or []):
             if i > 0:
                 ticker.append("  │  ", style="dim cyan")
             ticker.append_text(it)
