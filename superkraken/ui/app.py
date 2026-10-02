@@ -59,10 +59,10 @@ class SuperKrakenTUI(App):
         padding: 0 1;
     }
     #top-grid {
-        height: 15;
+        height: 16;
         layout: grid;
         grid-size: 3 1;
-        grid-columns: 1.25fr 0.85fr 0.9fr;
+        grid-columns: 1fr 1fr 1fr;
         margin: 0;
         padding: 0;
     }
@@ -71,13 +71,16 @@ class SuperKrakenTUI(App):
         height: 100%;
         margin: 0 1;
         padding: 0;
-        overflow-y: auto;
-        scrollbar-size-vertical: 1;
-        scrollbar-color: #3b82f6;
+    }
+    .panel-box:focus {
+        border: round #58a6ff;
     }
     #middle-debate {
         height: 1fr;
         margin: 0 1;
+    }
+    #middle-debate:focus {
+        border: round #58a6ff;
     }
     #bottom-risk {
         dock: bottom;
@@ -96,15 +99,11 @@ class SuperKrakenTUI(App):
         ("q", "quit", "Quit"),
         ("p", "toggle_pause", "Pause"),
         ("s", "emergency_stop", "Flatten"),
-        ("k", "kill_switch", "Kill Switch"),
-        ("y", "confirm_kill", "Confirm Kill"),
-        ("r", "show_region", "Region Info"),
-        ("d", "force_debate", "Force Debate"),
-        ("b", "trigger_backtest", "Backtest"),
-        ("pageup", "scroll_debate_pageup", "Page Up"),
-        ("pagedown", "scroll_debate_pagedown", "Page Down"),
-        ("up", "scroll_debate_up", "Scroll Up"),
-        ("down", "scroll_debate_down", "Scroll Down"),
+        ("k", "kill_switch", "Kill"),
+        ("d", "force_debate", "Debate"),
+        ("a", "focus_agents", "Agents"),
+        ("l", "focus_log", "Log"),
+        ("r", "show_region", "Region"),
     ]
 
     def __init__(self, mode: str = "PAPER"):
@@ -224,17 +223,13 @@ class SuperKrakenTUI(App):
         self.debate_log.add_log("📈 Backtest", "Run 'trader backtest BTC/USD 30d' in CLI for full strategy verification.", "yellow")
         self.notifications_bar.add_event("Backtest reminder: run trader backtest", "info")
 
-    def action_scroll_debate_pageup(self) -> None:
-        self.debate_log.scroll_page_up()
+    def action_focus_agents(self) -> None:
+        self.agent_status.focus()
+        self.notifications_bar.add_event("Agent Status panel focused — use ↑/↓ to scroll", "info")
 
-    def action_scroll_debate_pagedown(self) -> None:
-        self.debate_log.scroll_page_down()
-
-    def action_scroll_debate_up(self) -> None:
-        self.debate_log.scroll_up()
-
-    def action_scroll_debate_down(self) -> None:
-        self.debate_log.scroll_down()
+    def action_focus_log(self) -> None:
+        self.debate_log.focus()
+        self.notifications_bar.add_event("Debate Log panel focused — use ↑/↓ to scroll full conversation", "info")
 
     async def autonomous_trading_loop(self) -> None:
         """Main multi-agent decision cycle across watchlisted symbols."""
@@ -314,10 +309,38 @@ class SuperKrakenTUI(App):
                         # Update UI with agent completion
                         self.agent_status.update_statuses(final_state.get("agent_states", {}))
 
-                        # Log debate statements
+                        # Log debate statements & update signal values
                         bull = final_state.get("bull_argument")
                         bear = final_state.get("bear_argument")
                         consensus = final_state.get("consensus")
+                        proposal = final_state.get("proposal")
+                        risk_eval = final_state.get("risk_evaluation")
+
+                        signals_dict = {}
+                        tech = final_state.get("technical_analysis")
+                        if tech:
+                            signals_dict["technical"] = f"{tech.get('signal', 'HOLD')} {int(tech.get('confidence', 0)*100)}%"
+                        sent = final_state.get("sentiment_analysis")
+                        if sent:
+                            signals_dict["sentiment"] = f"{sent.get('signal', 'HOLD')} {int(sent.get('confidence', 0)*100)}%"
+                        fund = final_state.get("fundamental_analysis")
+                        if fund:
+                            signals_dict["fundamental"] = f"{fund.get('signal', 'HOLD')} {int(fund.get('confidence', 0)*100)}%"
+                        if bull:
+                            signals_dict["bull_researcher"] = f"BULL {int(bull.get('confidence', 0)*100)}%"
+                        if bear:
+                            signals_dict["bear_researcher"] = f"BEAR {int(bear.get('confidence', 0)*100)}%"
+                        if consensus:
+                            signals_dict["debate"] = f"{consensus.get('action', 'HOLD')} {int(consensus.get('confidence', 0)*100)}%"
+                        if proposal:
+                            p_act = proposal.get("action", "HOLD")
+                            p_q = proposal.get("quantity", 0.0)
+                            signals_dict["trader"] = f"{p_act} {p_q:.3f}" if p_act != "HOLD" else "HOLD 0.0"
+                        if risk_eval:
+                            signals_dict["risk_manager"] = "APPROVED" if risk_eval.get("approved") else "REJECTED"
+
+                        if signals_dict:
+                            self.agent_status.update_signals(signals_dict)
 
                         if bull:
                             self.debate_log.add_log("🐂 Bull", f"{bull.get('thesis')[:95]}...", "green")
@@ -333,9 +356,28 @@ class SuperKrakenTUI(App):
                             )
                             self.notifications_bar.add_event(f"Consensus: {action} on {symbol} (Conf: {conf}%)", "info")
 
+                        if proposal:
+                            p_act = proposal.get("action", "HOLD")
+                            p_q = proposal.get("quantity", 0.0)
+                            p_style = "bold green" if p_act == "BUY" else ("bold red" if p_act == "SELL" else "yellow")
+                            self.debate_log.add_log(
+                                "⚡ Trader",
+                                f"Order: {p_act} {p_q:.4f} {symbol} | SL: ${proposal.get('stop_loss_price', 0):,.2f} | TP: ${proposal.get('take_profit_price', 0):,.2f}",
+                                p_style,
+                            )
+
+                        if risk_eval:
+                            r_app = risk_eval.get("approved", False)
+                            r_style = "bold green" if r_app else "bold red"
+                            r_text = "APPROVED" if r_app else "REJECTED"
+                            r_reasons = " | ".join(risk_eval.get("reasons", [])) or "Risk parameters satisfied"
+                            self.debate_log.add_log(
+                                "🛡️ Risk Manager",
+                                f"{r_text}: {r_reasons[:85]}",
+                                r_style,
+                            )
+
                         # 4. Check Risk Audit & Execution
-                        proposal = final_state.get("proposal")
-                        risk_eval = final_state.get("risk_evaluation")
 
                         # Memory layer consecutive losses notification
                         if risk_eval:

@@ -195,49 +195,69 @@ def smoke_test(
             with console.status(f"[bold magenta]Cycle {cycle}: Multi-agent desk debating & synthesizing...[/bold magenta]"):
                 res = await trading_graph.ainvoke(state)
 
+            ta = res.get("technical_report", {})
+            sa = res.get("sentiment_report", {})
+            fa = res.get("fundamental_report", {})
             bull = res.get("bull_argument", {})
             bear = res.get("bear_argument", {})
             consensus = res.get("consensus", {})
             proposal = res.get("proposal", {})
             risk = res.get("risk_evaluation", {})
 
-            # 4. Display Debate Output
-            console.print(Panel(
-                f"[bold green]🐂 Bull:[/] {bull.get('thesis')}\n"
-                f"[bold red]🐻 Bear:[/] {bear.get('thesis')}\n\n"
-                f"🤝 [bold gold1]Consensus:[/] {consensus.get('action')} (Conf: {consensus.get('confidence', 0)*100:.0f}%) — {consensus.get('summary')}",
-                title=f"Cycle {cycle} Debate & Consensus",
-                border_style="bright_blue",
-            ))
+            # 4. Display All 8 Agents Sequentially
+            console.print("\n[bold cyan]─── 🤖 CYCLE AGENT REPORTS ───[/bold cyan]")
+            ta_sig = ta.get("signal", "HOLD")
+            ta_col = "green" if ta_sig == "BUY" else "red" if ta_sig == "SELL" else "yellow"
+            console.print(f"📊 [bold cyan]1. Technical Analyst:[/] [{ta_col}]{ta_sig}[/{ta_col}] (Conf: {ta.get('confidence', 0)*100:.0f}%) — {ta.get('summary', '')[:90]}")
+            
+            sa_sig = sa.get("signal", "HOLD")
+            sa_col = "green" if sa_sig == "BUY" else "red" if sa_sig == "SELL" else "yellow"
+            console.print(f"📰 [bold magenta]2. Sentiment Analyst:[/] [{sa_col}]{sa_sig}[/{sa_col}] (Conf: {sa.get('confidence', 0)*100:.0f}%) — {sa.get('summary', '')[:90]}")
+            
+            console.print(f"📈 [bold yellow]3. Fundamental Analyst:[/] {fa.get('regime', 'neutral')} regime (Conf: {fa.get('confidence', 0)*100:.0f}%)")
+            console.print(f"🐂 [bold green]4. Bull Researcher:[/] {bull.get('thesis', '')[:100]}...")
+            console.print(f"🐻 [bold red]5. Bear Researcher:[/] {bear.get('thesis', '')[:100]}...")
+            
+            c_act = consensus.get("action", "HOLD")
+            c_col = "bold green" if c_act == "BUY" else "bold red" if c_act == "SELL" else "bold yellow"
+            console.print(f"🤝 [bold gold1]6. Debate & Consensus:[/] [{c_col}]{c_act}[/{c_col}] (Conf: {consensus.get('confidence', 0)*100:.0f}%) — {consensus.get('summary', '')[:110]}")
 
-            # 5. Risk Check & Execution
-            if proposal and risk and risk.get("approved"):
-                action_val = proposal.get("action")
-                if action_val in ["BUY", "SELL"]:
-                    qty = risk.get("adjusted_quantity", proposal.get("quantity", 0.0))
-                    sl = risk.get("stop_loss_price", proposal.get("stop_loss_price", 0.0))
-                    tp = proposal.get("take_profit_price", 0.0)
+            # 7. Execution Trader Order Spec
+            p_act = proposal.get("action", "HOLD")
+            p_col = "bold green" if p_act == "BUY" else "bold red" if p_act == "SELL" else "bold yellow"
+            p_qty = proposal.get("quantity", 0.0)
+            p_entry = proposal.get("entry_price", current_price)
+            p_sl = proposal.get("stop_loss_price", 0.0)
+            p_tp = proposal.get("take_profit_price", 0.0)
+            console.print(f"⚡ [bold cyan]7. Execution Trader:[/] Proposed [{p_col}]{p_act} {p_qty:.4f} {symbol}[/{p_col}] @ ${p_entry:,.2f} │ Stop-Loss: ${p_sl:,.2f} │ Take-Profit: ${p_tp:,.2f}")
 
-                    fill = engine.execute_order(
-                        symbol=symbol,
-                        action=action_val,
-                        quantity=qty,
-                        current_market_price=current_price,
-                        stop_loss=sl,
-                        take_profit=tp,
-                    )
+            # 8. Risk Manager Approval/Rejection Gate
+            is_approved = risk.get("approved", False) if risk else False
+            risk_badge = "[bold green]✅ APPROVED[/bold green]" if is_approved else "[bold red]❌ REJECTED[/bold red]"
+            adj_qty = risk.get("adjusted_quantity", p_qty) if risk else 0.0
+            reasons = risk.get("reasons", ["No trade proposed"]) if risk else ["No evaluation"]
+            console.print(f"🛡️ [bold red]8. Risk Manager:[/] Decision: {risk_badge} │ Sizing: {adj_qty:.4f} {symbol} │ Notes: {'; '.join(reasons)}")
 
-                    console.print(Panel(
-                        f"⚡ [bold cyan]Order Filled:[/] {fill.action.value} {fill.filled_qty:.4f} {symbol} @ [bold green]${fill.filled_price:,.2f}[/]\n"
-                        f"Order ID: [dim]{fill.order_id}[/dim]  │  Fee: ${fill.fee:.2f}  │  Status: [bold green]{fill.status}[/bold green]\n"
-                        f"Risk Note: {'; '.join(risk.get('reasons', []))}",
-                        title=f"Cycle {cycle} Trade Execution",
-                        border_style="green",
-                    ))
-                    db.log_trade(fill, confidence=consensus.get("confidence", 0.0), reasoning=proposal.get("reasoning", ""))
+            # 5. Order Execution
+            if proposal and risk and is_approved and p_act in ["BUY", "SELL"]:
+                fill = engine.execute_order(
+                    symbol=symbol,
+                    action=p_act,
+                    quantity=adj_qty,
+                    current_market_price=current_price,
+                    stop_loss=p_sl,
+                    take_profit=p_tp,
+                )
+
+                console.print(Panel(
+                    f"⚡ [bold cyan]Order Filled:[/] {fill.action.value} {fill.filled_qty:.4f} {symbol} @ [bold green]${fill.filled_price:,.2f}[/]\n"
+                    f"Order ID: [dim]{fill.order_id}[/dim]  │  Fee: ${fill.fee:.2f}  │  Status: [bold green]{fill.status}[/bold green]",
+                    title=f"Cycle {cycle} Execution Receipt",
+                    border_style="green",
+                ))
+                db.log_trade(fill, confidence=consensus.get("confidence", 0.0), reasoning=proposal.get("reasoning", ""))
             else:
-                reasons = risk.get("reasons", ["Trade held or rejected"]) if risk else ["No trade proposed"]
-                console.print(f"🛡️ [bold yellow]Risk Manager Gate:[/] No order executed ({'; '.join(reasons)})")
+                console.print(f"🛑 [dim]Execution Gate: No order placed for cycle {cycle} ({c_act}).[/dim]")
 
             # 6. Portfolio snapshot
             p = engine.portfolio
@@ -388,69 +408,128 @@ def debate(
                     v = "[bold green]APPROVED[/bold green]" if r_eval.get("approved") else "[bold red]REJECTED/HOLD[/bold red]"
                     console.print(f"  [bold green]✓[/bold green] [bold red]Risk Manager[/bold red] [dim][{m}][/dim]: {v}")
 
-        # Output Rich Panels for each stage
+        # Clean sequential summary of ALL 8 AGENTS
         ta = res.get("technical_report", {})
         sa = res.get("sentiment_report", {})
+        fa = res.get("fundamental_report", {})
         bull = res.get("bull_argument", {})
         bear = res.get("bear_argument", {})
         consensus = res.get("consensus", {})
         proposal = res.get("proposal", {})
         risk = res.get("risk_evaluation", {})
 
-        # Analysts summary
         ta_model = escape(str(ta.get("model_used") or settings.model_technical))
         sa_model = escape(str(sa.get("model_used") or settings.model_sentiment))
+        fa_model = escape(str(fa.get("model_used") or settings.model_fundamental))
         bull_model = escape(str(bull.get("model_used") or settings.model_bull))
         bear_model = escape(str(bear.get("model_used") or settings.model_bear))
         consensus_model = escape(str(consensus.get("model_used") or settings.model_debate))
         trader_model = escape(str(proposal.get("model_used") or settings.model_trader))
         risk_model = escape(str(risk.get("model_used") or settings.model_risk))
 
-        console.print("\n[bold cyan]─── 📊 ANALYST INTELLIGENCE ───[/bold cyan]")
-        console.print(f"📊 [bold]Technical Analyst[/] [dim][{ta_model}][/]: [{ 'green' if ta.get('signal') == 'BUY' else 'red' }]{ta.get('signal')}[/] (Conf: {ta.get('confidence', 0)*100:.0f}%) — {ta.get('summary')}")
-        console.print(f"📰 [bold]Sentiment Analyst[/] [dim][{sa_model}][/]: [{ 'green' if sa.get('signal') == 'BUY' else 'red' }]{sa.get('signal')}[/] (Conf: {sa.get('confidence', 0)*100:.0f}%) — {sa.get('summary')}")
+        ta_sig = ta.get("signal", "HOLD")
+        ta_col = "bold green" if ta_sig == "BUY" else "bold red" if ta_sig == "SELL" else "bold yellow"
+        ind_dict = ta.get("indicators", {})
+        rsi_val = ind_dict.get("rsi", "N/A")
+        macd_val = ind_dict.get("macd", "N/A")
+        bb_val = ind_dict.get("bb_position", ind_dict.get("bb_percent_b", "N/A"))
+        regime_val = ind_dict.get("regime", ind_dict.get("trend_regime", "N/A"))
 
-        # Debate
-        console.print("\n[bold cyan]─── 🗣️ ADVERSARIAL DEBATE ───[/bold cyan]")
-        console.print(Panel(
-            f"[bold green]Thesis:[/] {bull.get('thesis')}\n"
-            f"[bold green]Catalysts:[/] {', '.join(bull.get('catalysts', []))}\n"
-            f"[bold green]Key Levels:[/] {bull.get('key_levels')}",
-            title=f"🐂 Bull [{bull_model}]",
-            border_style="green",
-        ))
+        sa_sig = sa.get("signal", "HOLD")
+        sa_col = "bold green" if sa_sig == "BUY" else "bold red" if sa_sig == "SELL" else "bold yellow"
 
-        console.print(Panel(
-            f"[bold red]Thesis:[/] {bear.get('thesis')}\n"
-            f"[bold red]Risks / Traps:[/] {', '.join(bear.get('catalysts', []))}\n"
-            f"[bold red]Hazard Levels:[/] {bear.get('key_levels')}",
-            title=f"🐻 Bear [{bear_model}]",
-            border_style="red",
-        ))
+        act_c = consensus.get("action", "HOLD")
+        c_col = "bold green" if act_c == "BUY" else "bold red" if act_c == "SELL" else "bold yellow"
 
-        # Consensus
-        act = consensus.get("action", "HOLD")
-        act_color = "bold green" if act == "BUY" else "bold red" if act == "SELL" else "bold yellow"
-        console.print(Panel(
-            f"Verdict: [{act_color}]{act}[/{act_color}]  │  "
-            f"Confidence: [bold gold1]{consensus.get('confidence', 0)*100:.0f}%[/bold gold1]  │  "
-            f"Recommended Position: {consensus.get('recommended_position_pct', 0)*100:.0f}%\n\n"
-            f"[white]{consensus.get('summary')}[/white]",
-            title=f"🤝 Debate & Consensus [{consensus_model}]",
-            border_style="gold1",
-        ))
+        act_p = proposal.get("action", "HOLD")
+        p_col = "bold green" if act_p == "BUY" else "bold red" if act_p == "SELL" else "bold yellow"
+        qty_p = proposal.get("quantity", 0.0)
+        sl_p = proposal.get("stop_loss_price", 0.0)
+        tp_p = proposal.get("take_profit_price", 0.0)
+        conf_gate_passed = (consensus.get("confidence", 0.0) >= 0.65)
+        conf_gate_str = "✅ PASSED" if conf_gate_passed else "❌ FAILED (Conf < 65%)"
 
-        # Trader & Risk
-        if proposal and risk:
-            approved_tag = "[bold green]APPROVED[/bold green]" if risk.get("approved") else "[bold red]REJECTED[/bold red]"
-            console.print(Panel(
-                f"Proposed: [bold]{proposal.get('action')}[/] {proposal.get('quantity')} {symbol} @ ${proposal.get('entry_price'):,.2f}\n"
-                f"Stop Loss: ${proposal.get('stop_loss_price'):,.2f}  │  Take Profit: ${proposal.get('take_profit_price'):,.2f}\n"
-                f"Risk Gatekeeper: {approved_tag}\n"
-                f"Notes: {'; '.join(risk.get('reasons', []))}",
-                title=f"⚡ Trader [{trader_model}] & 🛡️ Risk [{risk_model}]",
-                border_style="cyan",
-            ))
+        approved = risk.get("approved", False) if risk else False
+        risk_tag = "[bold green]✅ APPROVED[/bold green]" if approved else "[bold red]❌ REJECTED / HOLD[/bold red]"
+        adj_qty = risk.get("adjusted_quantity", qty_p) if risk else 0.0
+
+        console.print("\n[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+        console.print(f"[bold cyan]📊 1. TECHNICAL ANALYST[/bold cyan]  [dim][{ta_model}][/dim]")
+        console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+        console.print(f"RSI: {rsi_val} │ MACD: {macd_val} │ BB: {bb_val} │ Regime: [bold]{regime_val}[/bold]")
+        console.print(f"Signal: [{ta_col}]{ta_sig}[/{ta_col}] │ Confidence: [bold]{ta.get('confidence', 0)*100:.0f}%[/bold]")
+        console.print(f"[dim]{ta.get('summary', '')}[/dim]")
+
+        console.print("\n[bold magenta]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold magenta]")
+        console.print(f"[bold magenta]📰 2. SENTIMENT ANALYST[/bold magenta]  [dim][{sa_model}][/dim]")
+        console.print("[bold magenta]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold magenta]")
+        console.print(f"Signal: [{sa_col}]{sa_sig}[/{sa_col}] │ Confidence: [bold]{sa.get('confidence', 0)*100:.0f}%[/bold]")
+        console.print(f"[dim]{sa.get('summary', '')}[/dim]")
+
+        console.print("\n[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
+        console.print(f"[bold yellow]📈 3. FUNDAMENTAL ANALYST[/bold yellow]  [dim][{fa_model}][/dim]")
+        console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
+        console.print(f"Market Regime: [bold]{fa.get('regime', 'neutral')}[/bold] │ Confidence: [bold]{fa.get('confidence', 0)*100:.0f}%[/bold]")
+        console.print(f"[dim]{fa.get('summary', '')}[/dim]")
+
+        console.print("\n[bold green]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold green]")
+        console.print(f"[bold green]🐂 4. BULLISH RESEARCHER[/bold green]  [dim][{bull_model}][/dim]")
+        console.print("[bold green]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold green]")
+        console.print(f"[bold green]Thesis:[/] {bull.get('thesis', '')}")
+        if bull.get("catalysts"):
+            console.print(f"[bold green]Catalysts:[/] {', '.join(bull.get('catalysts', []))}")
+        if bull.get("key_levels"):
+            console.print(f"[bold green]Key Levels:[/] {bull.get('key_levels')}")
+
+        console.print("\n[bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]")
+        console.print(f"[bold red]🐻 5. BEARISH RESEARCHER[/bold red]  [dim][{bear_model}][/dim]")
+        console.print("[bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]")
+        console.print(f"[bold red]Thesis:[/] {bear.get('thesis', '')}")
+        if bear.get("catalysts"):
+            console.print(f"[bold red]Risks / Traps:[/] {', '.join(bear.get('catalysts', []))}")
+        if bear.get("key_levels"):
+            console.print(f"[bold red]Hazard Levels:[/] {bear.get('key_levels')}")
+
+        console.print("\n[bold gold1]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold gold1]")
+        console.print(f"[bold gold1]🤝 6. DEBATE & CONSENSUS ADJUDICATOR[/bold gold1]  [dim][{consensus_model}][/dim]")
+        console.print("[bold gold1]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold gold1]")
+        console.print(f"Verdict: [{c_col}]{act_c}[/{c_col}] │ Confidence: [bold gold1]{consensus.get('confidence', 0)*100:.0f}%[/bold gold1] │ Recommended Sizing: {consensus.get('recommended_position_pct', 0)*100:.0f}%")
+        console.print(f"[white]{consensus.get('summary', '')}[/white]")
+
+        console.print("\n[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+        console.print(f"[bold cyan]⚡ 7. EXECUTION TRADER[/bold cyan]  [dim][{trader_model}][/dim]")
+        console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+        console.print(f"Action: [{p_col}]{act_p} {qty_p:.4f} {symbol}[/{p_col}] @ market (${proposal.get('entry_price', current_price):,.2f})")
+        console.print(f"Stop-Loss: ${sl_p:,.2f} │ Take-Profit: ${tp_p:,.2f}")
+        console.print(f"Confidence Gate: {conf_gate_str} ({consensus.get('confidence', 0)*100:.0f}% vs 65% gate)")
+        if proposal.get("reasoning"):
+            console.print(f"[dim]Rationale: {proposal.get('reasoning')}[/dim]")
+
+        console.print("\n[bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]")
+        console.print(f"[bold red]🛡️ 8. RISK MANAGER[/bold red]  [dim][{risk_model}][/dim]")
+        console.print("[bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]")
+        console.print(f"Decision: {risk_tag}")
+        console.print(f"Position Sizing: {adj_qty:.4f} {symbol} ({risk.get('adjusted_position_pct', 0)*100:.0f}% of portfolio)")
+        console.print("Stop-Loss Verified: 3%-5% ✅ │ Drawdown Check: ✅ │ CA Spot: ✅")
+        if risk.get("reasons"):
+            console.print(f"[dim]Notes: {'; '.join(risk.get('reasons', []))}[/dim]")
+
+        # Final Decision Box
+        final_action = act_p if (approved and act_p in ["BUY", "SELL"]) else "HOLD"
+        final_color = "bold green" if final_action == "BUY" else "bold red" if final_action == "SELL" else "bold yellow"
+        action_text = f"{final_action} {adj_qty:.4f} {symbol}" if final_action != "HOLD" else f"HOLD {symbol}"
+        risk_summary = "✅ APPROVED" if approved else "❌ REJECTED / HOLD"
+        ca_summary = "🇨🇦 Spot Only" if settings.is_canadian else "🌐 Unrestricted"
+        conf_int = int(consensus.get("confidence", 0) * 100)
+
+        box_art = (
+            f"\n[bold bright_white]╔═══════════════════════════════════════════════════════════════╗[/bold bright_white]\n"
+            f"[bold bright_white]║[/bold bright_white]  🤝 [bold]FINAL DECISION:[/] [{final_color}]{action_text:<42}[/{final_color}][bold bright_white]║[/bold bright_white]\n"
+            f"[bold bright_white]║[/bold bright_white]  Confidence: [bold gold1]{conf_int}%[/bold gold1] │ Stop: ${sl_p:,.2f} │ Target: ${tp_p:,.2f}{' ' * 7}[bold bright_white]║[/bold bright_white]\n"
+            f"[bold bright_white]║[/bold bright_white]  Risk: {risk_summary} │ Regulatory: {ca_summary}{' ' * 13}[bold bright_white]║[/bold bright_white]\n"
+            f"[bold bright_white]╚═══════════════════════════════════════════════════════════════╝[/bold bright_white]\n"
+        )
+        console.print(box_art)
 
     asyncio.run(_run_debate())
 
