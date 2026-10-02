@@ -10,15 +10,16 @@ from superkraken.state import Candle
 logger = logging.getLogger(__name__)
 
 
-# Kraken symbol mapping: standard pair -> Kraken altname
-KRAKEN_PAIR_MAP = {
-    "BTC/USD": "XBTUSD",
-    "ETH/USD": "ETHUSD",
+# Kraken symbol mapping: human-readable pair -> Kraken internal API format
+PAIR_MAP = {
+    "BTC/USD": "XBTZUSD",
+    "ETH/USD": "XETHZUSD",
     "SOL/USD": "SOLUSD",
     "BTC/USDT": "XBTUSDT",
     "ETH/USDT": "ETHUSDT",
     "SOL/USDT": "SOLUSDT",
 }
+KRAKEN_PAIR_MAP = PAIR_MAP
 
 
 class KrakenMarketDataClient:

@@ -47,7 +47,8 @@ class DebateConsensusAgent(BaseAgent):
             f"🐻 BEARISH CASE (Conf: {bear.confidence:.2f}):\n"
             f"Thesis: {bear.thesis}\n"
             f"Catalysts: {', '.join(bear.catalysts)}\n\n"
-            "Conduct the cross-examination, evaluate risk vs reward asymmetry, and deliver the final verdict."
+            "Conduct the cross-examination, evaluate risk vs reward asymmetry, and deliver the final verdict. "
+            "Respond ONLY with the JSON object matching the required schema."
         )
 
         res = await self.call_llm(prompt, response_model=ConsensusResult)

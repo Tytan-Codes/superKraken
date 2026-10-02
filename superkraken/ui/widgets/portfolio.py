@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
+from superkraken.config import settings
 from superkraken.state import PortfolioState
 
 
@@ -50,7 +51,7 @@ class PortfolioWidget(Static):
         table.add_column("Unrealized P&L", justify="right")
 
         table.add_row(
-            "USD Cash",
+            f"{settings.base_currency} Cash",
             f"${self.portfolio.cash_usd:,.2f}",
             Text("0.00%", style="dim"),
         )

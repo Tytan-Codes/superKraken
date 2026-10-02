@@ -23,6 +23,16 @@ class Settings(BaseSettings):
         description="OpenRouter API base URL",
     )
 
+    # Account & Region Configuration
+    account_region: str = Field(
+        default="CA",
+        description="Account region: 'CA' = Canada, 'US' = USA, 'GLOBAL' = unrestricted",
+    )
+    base_currency: str = Field(
+        default="USDC",
+        description="Base settlement currency: USDC for CA spot trading, USD for US/GLOBAL",
+    )
+
     # Kraken CLI & API Configuration
     kraken_api_key: str = Field(default="", description="Kraken API Key")
     kraken_api_secret: str = Field(default="", description="Kraken API Secret")
@@ -122,6 +132,22 @@ class Settings(BaseSettings):
         default_factory=lambda: Path.home() / ".superkraken",
         description="Directory for local state, databases, and logs",
     )
+
+    @property
+    def is_canadian(self) -> bool:
+        return self.account_region.upper() == "CA"
+
+    @property
+    def futures_enabled(self) -> bool:
+        return not self.is_canadian
+
+    @property
+    def margin_enabled(self) -> bool:
+        return not self.is_canadian
+
+    @property
+    def max_allowed_leverage(self) -> float:
+        return 1.0 if self.is_canadian else 5.0
 
     @property
     def pairs_list(self) -> List[str]:

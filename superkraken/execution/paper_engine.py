@@ -130,12 +130,22 @@ class PaperTradingEngine:
         limit_price: Optional[float] = None,
         stop_loss: float = 0.0,
         take_profit: float = 0.0,
+        leverage: float = 1.0,
+        order_category: str = "spot",
     ) -> ExecutionResult:
         """Execute simulated order with realistic slippage and fees."""
         if isinstance(action, str):
             action = TradeAction(action.upper())
         if isinstance(order_type, str):
             order_type = OrderType(order_type.lower())
+
+        if settings.is_canadian:
+            if leverage > 1.0:
+                logger.warning(f"[RESTRICTED: CA] Leverage {leverage}x stripped — Canadian spot accounts locked to 1.0x.")
+                leverage = 1.0
+            if order_category.lower() in ("futures", "margin"):
+                logger.warning(f"⚠️ [RESTRICTED: CA] {order_category.capitalize()} unavailable — falling back to spot order.")
+                order_category = "spot"
 
         if quantity <= 0 or current_market_price <= 0:
             return ExecutionResult(

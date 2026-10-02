@@ -36,10 +36,11 @@ class TopHeaderWidget(Static):
 
     def render(self) -> str:
         mode_tag = f"[{'bold red' if self.mode == 'LIVE' else 'bold yellow'}][{self.mode}][/]"
+        reg_tag = "[bold cyan][CA-SPOT][/]" if settings.is_canadian else f"[dim][{settings.account_region}][/]"
         return (
-            f" 🤖 [bold cyan]KRAKEN TRADING AGENTS[/bold cyan] {mode_tag} "
-            f"[dim]│ Wall Street Multi-Agent Desk[/dim] "
-            f"[bold green]Portfolio: ${self.portfolio_value:,.2f}[/bold green]"
+            f" 🤖 [bold cyan]KRAKEN TRADING AGENTS[/bold cyan] {mode_tag} {reg_tag} "
+            f"[dim]│ Wall Street Desk[/dim] "
+            f"[bold green]Portfolio: ${self.portfolio_value:,.2f} {settings.base_currency}[/bold green]"
         )
 
 
@@ -93,6 +94,8 @@ class SuperKrakenTUI(App):
         ("p", "toggle_pause", "Pause"),
         ("s", "emergency_stop", "Flatten"),
         ("k", "kill_switch", "Kill Switch"),
+        ("y", "confirm_kill", "Confirm Kill"),
+        ("r", "show_region", "Region Info"),
         ("d", "force_debate", "Force Debate"),
         ("b", "trigger_backtest", "Backtest"),
     ]
@@ -104,6 +107,7 @@ class SuperKrakenTUI(App):
         self.market_client = KrakenMarketDataClient()
         self.paused = False
         self.kill_switch_active = False
+        self._confirming_kill = False
         self._loop_task: Optional[asyncio.Task] = None
 
         # Widgets
@@ -150,9 +154,32 @@ class SuperKrakenTUI(App):
         )
 
     async def action_kill_switch(self) -> None:
-        """Trigger emergency kill switch: liquidates portfolio and permanently halts all agents."""
+        """Trigger emergency kill switch with operator confirmation barrier."""
+        if not self._confirming_kill:
+            self._confirming_kill = True
+            self.debate_log.add_log(
+                "⚠️ CONFIRM KILL",
+                "CONFIRMATION REQUIRED: Press 'k' again or 'y' within 5s to permanently liquidate all positions.",
+                "bold red",
+            )
+            self.notifications_bar.add_event("⚠️ Confirm Kill Switch: press 'k' or 'y' to confirm", "warn")
+            asyncio.create_task(self._reset_kill_confirm())
+            return
+
+        await self._execute_kill_switch()
+
+    async def action_confirm_kill(self) -> None:
+        if self._confirming_kill:
+            await self._execute_kill_switch()
+
+    async def _reset_kill_confirm(self) -> None:
+        await asyncio.sleep(5.0)
+        self._confirming_kill = False
+
+    async def _execute_kill_switch(self) -> None:
         self.paused = True
         self.kill_switch_active = True
+        self._confirming_kill = False
         self.debate_log.add_log("🚨 KILL SWITCH", "CRITICAL: ALL AGENTS HALTED. LIQUIDATING PORTFOLIO.", "bold red")
         self.notifications_bar.add_event("🚨 KILL SWITCH ACTIVATED: ALL SYSTEMS HALTED", "warn")
         prices = {s: d["price"] for s, d in self.price_feed.prices.items()}
@@ -167,8 +194,20 @@ class SuperKrakenTUI(App):
         )
         audit_logger.log_decision_cycle({
             "action": "KILL_SWITCH_ACTIVATED",
-            "reason": "Emergency kill switch key 'K' pressed by operator",
+            "reason": "Emergency kill switch operator confirmation verified",
         })
+
+    async def action_show_region(self) -> None:
+        """Display active jurisdiction policy and regulatory restrictions."""
+        if settings.is_canadian:
+            reg_info = (
+                "🇨🇦 [bold cyan]REGION: CANADA (CA)[/bold cyan] — Spot: ✅ ENABLED | Base: USDC | "
+                "Futures: 🚫 RESTRICTED | Margin: 🚫 RESTRICTED | Leverage: 🚫 LOCKED 1.0x"
+            )
+        else:
+            reg_info = f"🌐 REGION: {settings.account_region} — Full trading capabilities enabled."
+        self.debate_log.add_log("🇨🇦 Region Info", reg_info, "bold cyan")
+        self.notifications_bar.add_event(f"Region: {settings.account_region} (CA Compliance active)", "info")
 
     async def action_force_debate(self) -> None:
         self.debate_log.add_log("⚡ Force Debate", "Triggering out-of-band multi-agent debate cycle...", "cyan")

@@ -13,6 +13,49 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def _sanitize_dict(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce percentages, enums, and score ranges into valid Pydantic types."""
+    d = dict(data)
+    if "action" in d and isinstance(d["action"], str):
+        act = d["action"].upper().strip()
+        if "BUY" in act:
+            d["action"] = "BUY"
+        elif "SELL" in act:
+            d["action"] = "SELL"
+        else:
+            d["action"] = "HOLD"
+
+    for field in ("confidence", "bull_score", "bear_score", "recommended_position_pct", "position_pct"):
+        if field in d:
+            val = d[field]
+            if isinstance(val, str):
+                val = val.replace("%", "").strip()
+                try:
+                    val = float(val)
+                except ValueError:
+                    val = 0.5
+            if isinstance(val, (int, float)):
+                if val > 1.0 and val <= 100.0:
+                    val = val / 100.0
+                elif val > 100.0:
+                    val = 1.0
+                d[field] = max(0.0, min(1.0, float(val)))
+
+    for field in ("recommended_leverage", "leverage"):
+        if field in d:
+            val = d[field]
+            if isinstance(val, str):
+                val = val.replace("x", "").replace("X", "").strip()
+                try:
+                    val = float(val)
+                except ValueError:
+                    val = 1.0
+            if isinstance(val, (int, float)):
+                d[field] = float(val)
+
+    return d
+
+
 class BaseAgent:
     """Base class for all trading desk specialized agents."""
 
@@ -74,8 +117,8 @@ class BaseAgent:
                 model=model,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=2500,
-                timeout=25.0,
+                max_tokens=6000,
+                timeout=50.0,
             )
             msg = response.choices[0].message
             content = msg.content or ""
@@ -83,7 +126,12 @@ class BaseAgent:
             
             # Prioritize content if it contains json/text, fallback to reasoning if content is empty
             if response_model is not None:
-                raw_text = content if "{" in content else (reasoning if "{" in reasoning else content or reasoning)
+                if content and "{" in content:
+                    raw_text = content
+                elif reasoning and "{" in reasoning:
+                    raw_text = reasoning
+                else:
+                    raw_text = content or reasoning
             else:
                 raw_text = content or reasoning
                 
@@ -106,14 +154,19 @@ class BaseAgent:
                     model=model,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=4000,
-                    timeout=30.0,
+                    max_tokens=6000,
+                    timeout=50.0,
                 )
                 msg = response.choices[0].message
                 content = msg.content or ""
                 reasoning = getattr(msg, "reasoning", "") or ""
                 if response_model is not None:
-                    raw_text = content if "{" in content else (reasoning if "{" in reasoning else content or reasoning)
+                    if content and "{" in content:
+                        raw_text = content
+                    elif reasoning and "{" in reasoning:
+                        raw_text = reasoning
+                    else:
+                        raw_text = content or reasoning
                 else:
                     raw_text = content or reasoning
 
@@ -163,6 +216,8 @@ class BaseAgent:
                         res.model_used = "heuristic-rules"
                     return res
 
+
+
     def _parse_json_response(self, text: str, schema: Type[T]) -> T:
         """Extract and parse structured JSON from model output."""
         cleaned = text.strip()
@@ -171,7 +226,16 @@ class BaseAgent:
         if "<think>" in cleaned and "</think>" not in cleaned:
             cleaned = re.sub(r"<think>[\s\S]*", "", cleaned).strip()
 
-        # Try markdown json block (greedy to outermost closing brace)
+        # 1. Try json_repair directly on the cleaned text
+        try:
+            import json_repair
+            repaired = json_repair.loads(cleaned)
+            if isinstance(repaired, dict):
+                return schema.model_validate(_sanitize_dict(repaired))
+        except Exception:
+            pass
+
+        # 2. Try markdown json block (greedy to outermost closing brace)
         json_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", cleaned)
         if json_match:
             candidate = json_match.group(1).strip()
@@ -186,13 +250,13 @@ class BaseAgent:
 
         try:
             data = json.loads(candidate)
-            return schema.model_validate(data)
+            return schema.model_validate(_sanitize_dict(data))
         except Exception:
             try:
                 import json_repair
                 repaired = json_repair.loads(candidate)
                 if isinstance(repaired, dict):
-                    return schema.model_validate(repaired)
+                    return schema.model_validate(_sanitize_dict(repaired))
             except Exception:
                 pass
             logger.warning(f"[{self.name}] JSON parse failed on: '{candidate[:200]}...'")

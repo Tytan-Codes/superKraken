@@ -123,6 +123,18 @@ class RiskManagerAgent(BaseAgent):
                 f"Automatically tightened position sizing by 50% for risk preservation."
             )
 
+        # 3c. Leverage Gate
+        if settings.is_canadian:
+            # Canadian account: skip leverage approval step entirely, locked to 1.0x spot
+            proposal.leverage = 1.0
+        else:
+            # US/GLOBAL: Full leverage check
+            if proposal.leverage > settings.max_allowed_leverage:
+                reasons.append(
+                    f"Leverage reduced from {proposal.leverage:.1f}x to maximum allowed {settings.max_allowed_leverage:.1f}x."
+                )
+                proposal.leverage = settings.max_allowed_leverage
+
         # 4. Mandatory Stop-Loss Validation (3% to 5%)
         entry = proposal.entry_price
         sl = proposal.stop_loss_price

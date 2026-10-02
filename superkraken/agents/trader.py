@@ -86,7 +86,13 @@ class ExecutionTraderAgent(BaseAgent):
             "Enforce a 3% to 5% stop loss."
         )
 
-        return await self.call_llm(prompt, response_model=TradeProposal)
+        if settings.is_canadian:
+            prompt += "\nIMPORTANT: Canadian account detected (ACCOUNT_REGION='CA'). Futures and margin are restricted; leverage is locked to 1.0x (Spot only)."
+
+        proposal = await self.call_llm(prompt, response_model=TradeProposal)
+        if settings.is_canadian:
+            proposal.leverage = 1.0
+        return proposal
 
     def _heuristic_fallback(self, context: str, schema: Optional[Type[TradeProposal]]) -> TradeProposal:
         # Bold execution sizing

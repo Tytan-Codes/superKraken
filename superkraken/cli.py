@@ -47,9 +47,9 @@ def run_preflight_checklist(mode: str) -> bool:
     engine = PaperTradingEngine()
     bal = engine.portfolio.total_value_usd
     if bal > 0:
-        checks.append(("Portfolio Balance", f"${bal:,.2f} USD (> $0)", True))
+        checks.append(("Portfolio Balance", f"${bal:,.2f} {settings.base_currency} (> $0)", True))
     else:
-        checks.append(("Portfolio Balance", "$0.00 (Zero Capital)", False))
+        checks.append(("Portfolio Balance", f"$0.00 {settings.base_currency} (Zero Capital)", False))
 
     # 4. Circuit Breaker
     cb_limit = settings.daily_drawdown_limit_pct * 100
@@ -61,6 +61,12 @@ def run_preflight_checklist(mode: str) -> bool:
 
     # 6. Assigned 2026 Models
     checks.append(("2026 Models Configuration", "ALL 8 AGENTS CONFIGURED", True))
+
+    # 7. Regulatory Compliance Check
+    if settings.is_canadian:
+        checks.append(("Account Region Compliance", "🇨🇦 Canadian account detected — futures/margin/leverage DISABLED (spot only)", True))
+    else:
+        checks.append(("Account Region Compliance", f"🌐 {settings.account_region} (unrestricted trading)", True))
 
     table = Table(title="📋 Pre-Flight Verification Results", expand=True)
     table.add_column("Safety / Health Check", style="bold white")
@@ -662,8 +668,8 @@ def backtest(
         delta_ret = res_b["total_return"] - res_a["total_return"]
         delta_ret_style = "bold green" if delta_ret >= 0 else "bold red"
 
-        table.add_row("Initial Balance", "$10,000.00", "$10,000.00", "-")
-        table.add_row("Ending Balance", f"${res_a['capital']:,.2f}", f"${res_b['capital']:,.2f}", f"{'+' if delta_ret>=0 else ''}${res_b['capital']-res_a['capital']:,.2f}")
+        table.add_row("Initial Balance", f"$10,000.00 {settings.base_currency}", f"$10,000.00 {settings.base_currency}", "-")
+        table.add_row("Ending Balance", f"${res_a['capital']:,.2f} {settings.base_currency}", f"${res_b['capital']:,.2f} {settings.base_currency}", f"{'+' if delta_ret>=0 else ''}${res_b['capital']-res_a['capital']:,.2f} {settings.base_currency}")
         table.add_row("Total Return", f"[{ret_a_style}]{res_a['total_return']:+.2f}%[/{ret_a_style}]", f"[{ret_b_style}]{res_b['total_return']:+.2f}%[/{ret_b_style}]", f"[{delta_ret_style}]{delta_ret:+.2f}%[/{delta_ret_style}]")
         table.add_row("Total Executions", str(res_a["trades"]), str(res_b["trades"]), f"{res_b['trades'] - res_a['trades']}")
         table.add_row("Win Rate", f"{res_a['win_rate']:.1f}% ({res_a['wins']}W/{res_a['losses']}L)", f"{res_b['win_rate']:.1f}% ({res_b['wins']}W/{res_b['losses']}L)", f"{res_b['win_rate']-res_a['win_rate']:+.1f}%")
@@ -681,6 +687,29 @@ def backtest(
 @app.command()
 def config():
     """Display active risk tolerance, position sizing, and system preferences."""
+    # Jurisdictional & Region Compliance
+    reg_table = Table(title="🇨🇦 Regulatory & Account Region Compliance", expand=True)
+    reg_table.add_column("Regulatory Feature", style="bold cyan")
+    reg_table.add_column("Status / Policy", style="bold white")
+    reg_table.add_column("Regulatory Details", style="dim")
+
+    if settings.is_canadian:
+        reg_table.add_row("Region", "🇨🇦 Canada (CA)", "Account regulatory jurisdiction")
+        reg_table.add_row("Base Currency", f"{settings.base_currency} (USDC)", "Settlement asset (USDC held for CA spot trading)")
+        reg_table.add_row("Spot", "✅ Enabled", "Spot trading active on all pairs")
+        reg_table.add_row("Futures", "🚫 Disabled (restricted in CA)", "Derivatives restricted by Canadian regulations")
+        reg_table.add_row("Margin", "🚫 Disabled (restricted in CA)", "Margin trading restricted in CA")
+        reg_table.add_row("Leverage", "🚫 Disabled (restricted in CA — locked to 1x)", "Leverage multipliers locked strictly to 1.0x")
+    else:
+        reg_table.add_row("Region", f"🌐 {settings.account_region}", "Account regulatory jurisdiction")
+        reg_table.add_row("Base Currency", settings.base_currency, "Settlement asset")
+        reg_table.add_row("Spot", "✅ Enabled", "Spot trading active")
+        reg_table.add_row("Futures", "✅ Enabled", "Derivatives trading enabled")
+        reg_table.add_row("Margin", "✅ Enabled", "Margin trading enabled")
+        reg_table.add_row("Leverage", f"✅ Enabled (up to {settings.max_allowed_leverage:.0f}x)", "Configured max leverage")
+
+    console.print(reg_table)
+
     table = Table(title="⚙️ superKraken System Configuration", expand=True)
     table.add_column("Parameter", style="bold cyan")
     table.add_column("Value", style="bold white")

@@ -26,10 +26,17 @@ async def test_tui_app_mount():
         await app.action_toggle_pause()
         assert app.paused is False
 
-        # Verify emergency kill switch action
+        # Verify emergency kill switch action with confirmation barrier
+        await app.action_kill_switch()
+        assert app._confirming_kill is True
+        assert app.kill_switch_active is False
+        # Second press confirms kill switch
         await app.action_kill_switch()
         assert app.kill_switch_active is True
         assert app.paused is True
+
+        # Verify region info action
+        await app.action_show_region()
 
         # Verify portfolio sparkline history
         assert len(app.portfolio_widget.equity_history) >= 1
