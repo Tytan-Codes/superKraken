@@ -70,6 +70,17 @@ class PaperTradingEngine:
         self.save()
         return self.portfolio
 
+    def sync_live_balance(self, live_usdc: float) -> PortfolioState:
+        """Sync starting balance with verified live exchange USDC balance."""
+        if live_usdc > 0:
+            self.initial_balance = live_usdc
+            self.portfolio.cash_usd = live_usdc
+            self.portfolio.total_value_usd = live_usdc + sum(
+                p.current_price * p.quantity for p in self.portfolio.positions.values()
+            )
+            self.save()
+        return self.portfolio
+
     def update_market_prices(self, price_map: Dict[str, float]) -> List[ExecutionResult]:
         """Update valuations and evaluate open position stop-loss / take-profits."""
         positions_value = 0.0

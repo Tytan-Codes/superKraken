@@ -97,7 +97,15 @@ class Settings(BaseSettings):
         description="Fallback model if primary model fails",
     )
 
-    # Risk Parameters
+    # Day Trading & Risk Parameters
+    confidence_gate_min: float = Field(
+        default=0.55,
+        description="Minimum confidence threshold to execute a trade (tiered sizing: 55%/65%/75%)",
+    )
+    candle_interval_minutes: int = Field(
+        default=15,
+        description="Candle timeframe interval in minutes (15m for intraday day trading)",
+    )
     max_position_size_pct: float = Field(
         default=0.30,
         description="Maximum position size as fraction of portfolio (e.g. 0.30 = 30%)",
@@ -107,12 +115,12 @@ class Settings(BaseSettings):
         description="Minimum position size as fraction of portfolio",
     )
     stop_loss_pct: float = Field(
-        default=0.04,
-        description="Mandatory stop loss percentage (e.g. 0.04 = 4%)",
+        default=0.015,
+        description="Mandatory stop loss percentage for day trading (e.g. 0.015 = 1.5%)",
     )
     take_profit_pct: float = Field(
-        default=0.08,
-        description="Default target take profit percentage (e.g. 0.08 = 8%)",
+        default=0.028,
+        description="Default target take profit percentage for day trading (e.g. 0.028 = 2.8%, ~2:1 R:R)",
     )
     daily_drawdown_limit_pct: float = Field(
         default=0.10,

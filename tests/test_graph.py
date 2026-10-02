@@ -61,9 +61,9 @@ async def test_confidence_threshold_gate():
     trader = ExecutionTraderAgent()
     low_conf_consensus = ConsensusResult(
         action=TradeAction.BUY,
-        confidence=0.58,  # Below 65% threshold
+        confidence=0.48,  # Below 55% day-trading threshold
         summary="Weak consensus",
-        bull_score=0.6,
+        bull_score=0.45,
         bear_score=0.55,
         recommended_position_pct=0.1,
     )
@@ -71,5 +71,5 @@ async def test_confidence_threshold_gate():
 
     proposal = await trader.propose_trade("BTC/USD", 67000.0, low_conf_consensus, portfolio)
     assert proposal.action == TradeAction.HOLD
-    assert "below the mandatory 65.0% conviction threshold" in proposal.reasoning
+    assert "below the mandatory 55.0% day-trading conviction threshold" in proposal.reasoning
 

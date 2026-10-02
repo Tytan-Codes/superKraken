@@ -1,10 +1,13 @@
-"""Kraken Public REST and market data client with offline/synthetic fallback."""
-
+import base64
+import hashlib
+import hmac
 import logging
 import random
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+from superkraken.config import settings
 from superkraken.state import Candle
 
 logger = logging.getLogger(__name__)
@@ -12,14 +15,29 @@ logger = logging.getLogger(__name__)
 
 # Kraken symbol mapping: human-readable pair -> Kraken internal API format
 PAIR_MAP = {
-    "BTC/USD": "XBTZUSD",
+    "BTC/USD": "XXBTZUSD",
     "ETH/USD": "XETHZUSD",
     "SOL/USD": "SOLUSD",
     "BTC/USDT": "XBTUSDT",
     "ETH/USDT": "ETHUSDT",
     "SOL/USDT": "SOLUSDT",
+    "XXBTZUSD": "XXBTZUSD",
+    "XBTUSD": "XXBTZUSD",
+    "XBTZUSD": "XXBTZUSD",
 }
 KRAKEN_PAIR_MAP = PAIR_MAP
+
+
+def get_kraken_signature(urlpath: str, data: Dict[str, Any], secret: str) -> str:
+    """Generate Kraken HMAC-SHA512 API-Sign signature.
+
+    Formula: HMAC-SHA512(URI path + SHA256(nonce + POST data), base64_decode(secret))
+    """
+    postdata = urllib.parse.urlencode(data)
+    encoded = (str(data["nonce"]) + postdata).encode("utf-8")
+    message = urlpath.encode("utf-8") + hashlib.sha256(encoded).digest()
+    mac = hmac.new(base64.b64decode(secret, validate=True), message, hashlib.sha512)
+    return base64.b64encode(mac.digest()).decode("utf-8")
 
 
 class KrakenMarketDataClient:
@@ -187,3 +205,79 @@ class KrakenMarketDataClient:
             "ask_volume": round(ask_vol, 4),
             "imbalance": round(imbalance, 4),
         }
+
+    async def get_account_balances(
+        self, api_key: Optional[str] = None, api_secret: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Query /0/private/Balance using HMAC-SHA512 authentication."""
+        key = api_key if api_key is not None else settings.kraken_api_key
+        secret = api_secret if api_secret is not None else settings.kraken_api_secret
+
+        if not key or not secret:
+            return {
+                "success": False,
+                "error": "Missing KRAKEN_API_KEY or KRAKEN_API_SECRET in environment",
+                "balances": {},
+            }
+
+        urlpath = "/0/private/Balance"
+        url = f"https://api.kraken.com{urlpath}"
+        nonce = str(int(time.time() * 1000))
+        data = {"nonce": nonce}
+
+        try:
+            signature = get_kraken_signature(urlpath, data, secret)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Invalid API secret encoding: {e}",
+                "balances": {},
+            }
+
+        headers = {
+            "API-Key": key,
+            "API-Sign": signature,
+            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, headers=headers, data=data)
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    errors = payload.get("error", [])
+                    if errors:
+                        return {
+                            "success": False,
+                            "error": "; ".join(errors),
+                            "balances": {},
+                        }
+                    raw_balances = payload.get("result", {})
+                    # Clean up Kraken asset names (e.g. ZUSD -> USD, XXBT -> BTC, USDC -> USDC)
+                    cleaned = {}
+                    for asset, amount in raw_balances.items():
+                        c_asset = asset
+                        if asset.startswith("X") and len(asset) == 4:
+                            c_asset = asset[1:]
+                        elif asset.startswith("Z") and len(asset) == 4:
+                            c_asset = asset[1:]
+                        if c_asset == "XBT":
+                            c_asset = "BTC"
+                        cleaned[c_asset] = float(amount)
+                    return {
+                        "success": True,
+                        "balances": cleaned,
+                        "raw_result": raw_balances,
+                    }
+                return {
+                    "success": False,
+                    "error": f"HTTP {resp.status_code}: {resp.text}",
+                    "balances": {},
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Network error connecting to Kraken private API: {e}",
+                "balances": {},
+            }
+

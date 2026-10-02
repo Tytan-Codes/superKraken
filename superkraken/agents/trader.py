@@ -44,8 +44,12 @@ class ExecutionTraderAgent(BaseAgent):
         consensus: ConsensusResult,
         portfolio: PortfolioState,
     ) -> TradeProposal:
-        # Confidence Threshold Gate: must be > 65% to trade
-        if consensus.confidence < 0.65:
+        # Tiered Confidence Gate:
+        # Confidence < 55%: HOLD
+        # Confidence 55–64%: Small position (10% of portfolio)
+        # Confidence 65–74%: Medium position (20% of portfolio)
+        # Confidence 75%+:   Full position (25–30% of portfolio)
+        if consensus.confidence < 0.55:
             return TradeProposal(
                 symbol=symbol,
                 action=TradeAction.HOLD,
@@ -57,7 +61,7 @@ class ExecutionTraderAgent(BaseAgent):
                 model_used=self.default_model,
                 reasoning=(
                     f"Consensus confidence ({consensus.confidence * 100:.1f}%) is below the "
-                    "mandatory 65.0% conviction threshold; holding capital."
+                    "mandatory 55.0% day-trading conviction threshold; holding capital."
                 ),
             )
 
@@ -74,6 +78,13 @@ class ExecutionTraderAgent(BaseAgent):
                 reasoning="Consensus recommends HOLD; waiting for higher-conviction catalyst.",
             )
 
+        if consensus.confidence >= 0.75:
+            tier_desc = "Confidence is high (>=75%). Allocate FULL position size: 25% to 30% of portfolio value."
+        elif consensus.confidence >= 0.65:
+            tier_desc = "Confidence is medium (65–74%). Allocate MEDIUM position size: 20% of portfolio value."
+        else:
+            tier_desc = "Confidence is moderate (55–64%). Allocate SMALL position size: 10% of portfolio value."
+
         prompt = (
             f"Asset: {symbol}\n"
             f"Current Market Price: ${current_price:,.2f}\n"
@@ -82,8 +93,8 @@ class ExecutionTraderAgent(BaseAgent):
             f"Consensus Recommended Sizing: {consensus.recommended_position_pct:.2f}\n"
             f"Available Cash: ${portfolio.cash_usd:,.2f}\n"
             f"Total Portfolio Value: ${portfolio.total_value_usd:,.2f}\n\n"
-            "Formulate the trade proposal. If confidence >= 0.75, allocate between 20% and 30% of portfolio value. "
-            "Enforce a 3% to 5% stop loss."
+            f"Tiered Sizing Guideline: {tier_desc}\n"
+            "Enforce a day-trading stop-loss between 1.2% and 2.0% below entry (for BUY) and take-profit between 2.5% and 3.5% (~2:1 R:R)."
         )
 
         if settings.is_canadian:
