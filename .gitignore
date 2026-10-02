@@ -1,0 +1,35 @@
+# Environment & Keys
+.env
+*.env
+*.key
+*.secret
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# SuperKraken Local State & Databases
+*.db
+*.sqlite
+*.sqlite3
+paper_state.json
+.superkraken/
+
+# OS Specific
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
