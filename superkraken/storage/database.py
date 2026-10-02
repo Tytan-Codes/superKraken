@@ -29,6 +29,7 @@ class Database:
                 """
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_type TEXT NOT NULL DEFAULT 'PAPER',
                     order_id TEXT,
                     symbol TEXT NOT NULL,
                     action TEXT NOT NULL,
@@ -43,6 +44,12 @@ class Database:
                 )
                 """
             )
+            # Automatic schema migration for existing databases
+            try:
+                cursor.execute("ALTER TABLE trades ADD COLUMN session_type TEXT NOT NULL DEFAULT 'PAPER'")
+            except sqlite3.OperationalError:
+                pass
+
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS debates (
@@ -74,12 +81,18 @@ class Database:
                 """
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_type TEXT NOT NULL DEFAULT 'PAPER',
                     event_type TEXT NOT NULL,
                     details TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            try:
+                cursor.execute("ALTER TABLE audit_log ADD COLUMN session_type TEXT NOT NULL DEFAULT 'PAPER'")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
 
     def log_trade(
@@ -87,15 +100,17 @@ class Database:
         execution: ExecutionResult,
         confidence: float = 0.0,
         reasoning: str = "",
+        session_type: str = "PAPER",
     ) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO trades (order_id, symbol, action, price, quantity, fee, status, message, confidence, reasoning)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO trades (session_type, order_id, symbol, action, price, quantity, fee, status, message, confidence, reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    session_type,
                     execution.order_id,
                     execution.symbol,
                     execution.action.value,
@@ -139,15 +154,23 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
-    def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_recent_trades(self, limit: int = 20, session_type: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?
-                """,
-                (limit,),
-            )
+            if session_type:
+                cursor.execute(
+                    """
+                    SELECT * FROM trades WHERE session_type = ? ORDER BY timestamp DESC LIMIT ?
+                    """,
+                    (session_type, limit),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?
+                    """,
+                    (limit,),
+                )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_today_trade_count(self, symbol: Optional[str] = None) -> int:
@@ -171,28 +194,36 @@ class Database:
             row = cursor.fetchone()
             return row[0] if row else 0
 
-    def log_audit_event(self, event_type: str, details: str = "") -> int:
+    def log_audit_event(self, event_type: str, details: str = "", session_type: str = "PAPER") -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO audit_log (event_type, details)
-                VALUES (?, ?)
+                INSERT INTO audit_log (session_type, event_type, details)
+                VALUES (?, ?, ?)
                 """,
-                (event_type, details),
+                (session_type, event_type, details),
             )
             conn.commit()
             return cursor.lastrowid
 
-    def get_recent_audit_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_audit_events(self, limit: int = 10, session_type: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?
-                """,
-                (limit,),
-            )
+            if session_type:
+                cursor.execute(
+                    """
+                    SELECT * FROM audit_log WHERE session_type = ? ORDER BY timestamp DESC LIMIT ?
+                    """,
+                    (session_type, limit),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?
+                    """,
+                    (limit,),
+                )
             return [dict(row) for row in cursor.fetchall()]
 
 

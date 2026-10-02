@@ -93,7 +93,7 @@ def test_memory_layer_consecutive_loss_sizing():
             status="FILLED",
             message=f"Stop-loss hit: -${100.0 * i:.2f} loss",
         )
-        db.log_trade(loss_res, confidence=1.0, reasoning=f"Consecutive loss {i}")
+        db.log_trade(loss_res, confidence=1.0, reasoning=f"Consecutive loss {i}", session_type="TEST")
 
     portfolio = PortfolioState(
         cash_usd=10000.0,
