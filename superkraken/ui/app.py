@@ -59,10 +59,10 @@ class SuperKrakenTUI(App):
         padding: 0 1;
     }
     #top-grid {
-        height: 18;
+        height: 15;
         layout: grid;
         grid-size: 3 1;
-        grid-columns: 1fr 1fr 1fr;
+        grid-columns: 1.25fr 0.85fr 0.9fr;
         margin: 0;
         padding: 0;
     }

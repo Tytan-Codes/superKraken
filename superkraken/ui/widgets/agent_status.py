@@ -59,15 +59,16 @@ class AgentStatusWidget(Static):
         spinner_char = self.SPINNERS[self.spinner_idx]
 
         for key, name, model in agents_config:
+            m_label = model.split("/")[-1] if "/" in model else model
             state = self.agent_statuses.get(key, "IDLE").upper()
             if state in ("RUNNING", "THINKING"):
-                status_text = Text(f"{spinner_char} THINKING [{model}]...", style="bold yellow")
+                status_text = Text(f"{spinner_char} THINKING [{m_label}]...", style="bold yellow")
             elif state in ("COMPLETED", "COMPLETE", "READY"):
-                status_text = Text(f"✅ COMPLETE [{model}]", style="bold green")
+                status_text = Text(f"✅ COMPLETE [{m_label}]", style="bold green")
             elif state in ("FAILED", "ERROR"):
-                status_text = Text(f"❌ ERROR [{model}]", style="bold red")
+                status_text = Text(f"❌ ERROR [{m_label}]", style="bold red")
             else:
-                status_text = Text(f"⚪ IDLE [{model}]", style="dim white")
+                status_text = Text(f"⚪ IDLE [{m_label}]", style="dim white")
 
             table.add_row(name, status_text)
 
