@@ -254,7 +254,16 @@ class SuperKrakenTUI(App):
 
                         # Update open positions valuation in paper engine
                         all_prices = {s: d["price"] for s, d in self.price_feed.prices.items()}
-                        self.paper_engine.update_market_prices(all_prices)
+                        triggered_orders = self.paper_engine.update_market_prices(all_prices)
+                        for trig in triggered_orders:
+                            if "stop-loss" in trig.message.lower() or "stop" in trig.message.lower():
+                                pnl_pct = (trig.filled_price - trig.price) / trig.price * 100 if trig.price > 0 else -3.2
+                                self.notifications_bar.add_event(
+                                    f"🔴 STOP-LOSS HIT — exited {trig.symbol} @ ${trig.filled_price:,.2f} ({pnl_pct:.1f}%)",
+                                    "warn",
+                                )
+                                self.debate_log.add_log("🛑 Stop-Loss", f"Triggered on {trig.symbol} @ ${trig.filled_price:,.2f}", "bold red")
+
                         self.portfolio_widget.update_portfolio(self.paper_engine.portfolio)
                         self.top_header.update_value(self.paper_engine.portfolio.total_value_usd)
 
@@ -262,7 +271,7 @@ class SuperKrakenTUI(App):
                         if self.paper_engine.portfolio.daily_drawdown_pct >= settings.daily_drawdown_limit_pct:
                             msg = f"CIRCUIT BREAKER: {self.paper_engine.portfolio.daily_drawdown_pct * 100:.1f}% drawdown! Halting trading."
                             self.debate_log.add_log("🛡️ Risk Manager", f"[CIRCUIT BREAKER TRIGGERED] {msg}", "bold red")
-                            self.notifications_bar.add_event(f"🚨 [CIRCUIT BREAKER TRIGGERED] {msg}", "warn")
+                            self.notifications_bar.add_event(f"🔴 CIRCUIT BREAKER — trading halted", "warn")
                             db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", msg)
                             audit_logger.log_decision_cycle({
                                 "action": "CIRCUIT_BREAKER_ACTIVATED",
@@ -276,19 +285,19 @@ class SuperKrakenTUI(App):
                         candles = await self.market_client.get_ohlc(symbol, interval_minutes=1, count=100)
                         order_book = await self.market_client.get_order_book_depth(symbol)
 
-                        # Set agents to running in UI
+                        # Set initial agent states for this symbol cycle: Analysts thinking, rest waiting
                         self.agent_status.update_statuses({
-                            "technical": "RUNNING",
-                            "sentiment": "RUNNING",
-                            "fundamental": "RUNNING",
-                            "bull_researcher": "RUNNING",
-                            "bear_researcher": "RUNNING",
-                            "debate": "RUNNING",
-                            "trader": "RUNNING",
-                            "risk_manager": "RUNNING",
+                            "technical": "THINKING",
+                            "sentiment": "THINKING",
+                            "fundamental": "THINKING",
+                            "bull_researcher": "WAITING",
+                            "bear_researcher": "WAITING",
+                            "debate": "WAITING",
+                            "trader": "WAITING",
+                            "risk_manager": "WAITING",
                         })
 
-                        # 3. Execute LangGraph multi-agent flow
+                        # 3. Execute LangGraph multi-agent flow with live node streaming
                         initial_state = {
                             "symbol": symbol,
                             "current_price": current_price,
@@ -304,10 +313,73 @@ class SuperKrakenTUI(App):
                             "agent_states": {},
                         }
 
-                        final_state = await trading_graph.ainvoke(initial_state)
+                        final_state = dict(initial_state)
+                        async for chunk in trading_graph.astream(initial_state):
+                            for node_name, node_update in chunk.items():
+                                final_state.update(node_update)
+                                if node_name == "technical_analyst":
+                                    self.agent_status.update_statuses({"technical": "COMPLETED"})
+                                    tech = node_update.get("technical_report")
+                                    if tech:
+                                        self.agent_status.update_signals({"technical": f"{tech.get('signal', 'HOLD')} {int(tech.get('confidence', 0)*100)}%"})
+                                elif node_name == "sentiment_analyst":
+                                    self.agent_status.update_statuses({"sentiment": "COMPLETED"})
+                                    sent = node_update.get("sentiment_report")
+                                    if sent:
+                                        self.agent_status.update_signals({"sentiment": f"{sent.get('signal', 'HOLD')} {int(sent.get('confidence', 0)*100)}%"})
+                                elif node_name == "fundamental_analyst":
+                                    self.agent_status.update_statuses({"fundamental": "COMPLETED"})
+                                    fund = node_update.get("fundamental_report")
+                                    if fund:
+                                        self.agent_status.update_signals({"fundamental": f"{fund.get('signal', 'HOLD')} {int(fund.get('confidence', 0)*100)}%"})
 
-                        # Update UI with agent completion
-                        self.agent_status.update_statuses(final_state.get("agent_states", {}))
+                                if (
+                                    self.agent_status.agent_statuses.get("technical") in ("COMPLETED", "COMPLETE")
+                                    and self.agent_status.agent_statuses.get("sentiment") in ("COMPLETED", "COMPLETE")
+                                    and self.agent_status.agent_statuses.get("fundamental") in ("COMPLETED", "COMPLETE")
+                                    and self.agent_status.agent_statuses.get("bull_researcher") == "WAITING"
+                                ):
+                                    self.agent_status.update_statuses({"bull_researcher": "THINKING", "bear_researcher": "THINKING"})
+
+                                if node_name == "bull_researcher":
+                                    self.agent_status.update_statuses({"bull_researcher": "COMPLETED"})
+                                    bull = node_update.get("bull_argument")
+                                    if bull:
+                                        self.agent_status.update_signals({"bull_researcher": f"BULL {int(bull.get('confidence', 0)*100)}%"})
+                                elif node_name == "bear_researcher":
+                                    self.agent_status.update_statuses({"bear_researcher": "COMPLETED"})
+                                    bear = node_update.get("bear_argument")
+                                    if bear:
+                                        self.agent_status.update_signals({"bear_researcher": f"BEAR {int(bear.get('confidence', 0)*100)}%"})
+
+                                if (
+                                    self.agent_status.agent_statuses.get("bull_researcher") in ("COMPLETED", "COMPLETE")
+                                    and self.agent_status.agent_statuses.get("bear_researcher") in ("COMPLETED", "COMPLETE")
+                                    and self.agent_status.agent_statuses.get("debate") == "WAITING"
+                                ):
+                                    self.agent_status.update_statuses({"debate": "THINKING"})
+
+                                if node_name == "debate_consensus":
+                                    self.agent_status.update_statuses({"debate": "COMPLETED"})
+                                    cons = node_update.get("consensus")
+                                    if cons:
+                                        self.agent_status.update_signals({"debate": f"{cons.get('action', 'HOLD')} {int(cons.get('confidence', 0)*100)}%"})
+                                    self.agent_status.update_statuses({"trader": "THINKING"})
+
+                                if node_name == "execution_trader":
+                                    self.agent_status.update_statuses({"trader": "COMPLETED"})
+                                    prop = node_update.get("proposal")
+                                    if prop:
+                                        p_act = prop.get("action", "HOLD")
+                                        p_q = prop.get("quantity", 0.0)
+                                        self.agent_status.update_signals({"trader": f"{p_act} {p_q:.3f}" if p_act != "HOLD" else "HOLD 0.0"})
+                                    self.agent_status.update_statuses({"risk_manager": "THINKING"})
+
+                                if node_name == "risk_manager":
+                                    self.agent_status.update_statuses({"risk_manager": "COMPLETED"})
+                                    r_ev = node_update.get("risk_evaluation")
+                                    if r_ev:
+                                        self.agent_status.update_signals({"risk_manager": "APPROVED" if r_ev.get("approved") else "REJECTED"})
 
                         # Log debate statements & update signal values
                         bull = final_state.get("bull_argument")
@@ -315,32 +387,6 @@ class SuperKrakenTUI(App):
                         consensus = final_state.get("consensus")
                         proposal = final_state.get("proposal")
                         risk_eval = final_state.get("risk_evaluation")
-
-                        signals_dict = {}
-                        tech = final_state.get("technical_analysis")
-                        if tech:
-                            signals_dict["technical"] = f"{tech.get('signal', 'HOLD')} {int(tech.get('confidence', 0)*100)}%"
-                        sent = final_state.get("sentiment_analysis")
-                        if sent:
-                            signals_dict["sentiment"] = f"{sent.get('signal', 'HOLD')} {int(sent.get('confidence', 0)*100)}%"
-                        fund = final_state.get("fundamental_analysis")
-                        if fund:
-                            signals_dict["fundamental"] = f"{fund.get('signal', 'HOLD')} {int(fund.get('confidence', 0)*100)}%"
-                        if bull:
-                            signals_dict["bull_researcher"] = f"BULL {int(bull.get('confidence', 0)*100)}%"
-                        if bear:
-                            signals_dict["bear_researcher"] = f"BEAR {int(bear.get('confidence', 0)*100)}%"
-                        if consensus:
-                            signals_dict["debate"] = f"{consensus.get('action', 'HOLD')} {int(consensus.get('confidence', 0)*100)}%"
-                        if proposal:
-                            p_act = proposal.get("action", "HOLD")
-                            p_q = proposal.get("quantity", 0.0)
-                            signals_dict["trader"] = f"{p_act} {p_q:.3f}" if p_act != "HOLD" else "HOLD 0.0"
-                        if risk_eval:
-                            signals_dict["risk_manager"] = "APPROVED" if risk_eval.get("approved") else "REJECTED"
-
-                        if signals_dict:
-                            self.agent_status.update_signals(signals_dict)
 
                         if bull:
                             self.debate_log.add_log("🐂 Bull", f"{bull.get('thesis')[:95]}...", "green")
@@ -354,7 +400,6 @@ class SuperKrakenTUI(App):
                                 f"{action} on {symbol} — Conf: {conf}%: {consensus.get('summary')[:85]}",
                                 "bold gold1",
                             )
-                            self.notifications_bar.add_event(f"Consensus: {action} on {symbol} (Conf: {conf}%)", "info")
 
                         if proposal:
                             p_act = proposal.get("action", "HOLD")
@@ -388,7 +433,7 @@ class SuperKrakenTUI(App):
                                         "[MEMORY: SIZING TIGHTENED — 3 consecutive losses] Halving position size.",
                                         "bold yellow",
                                     )
-                                    self.notifications_bar.add_event("🛡️ 3 losses — sizing tightened 50%", "warn")
+                                    self.notifications_bar.add_event("🛡️ 3 consecutive losses — sizing cut 50%", "warn")
 
                         if proposal and risk_eval and risk_eval.get("approved"):
                             action_val = proposal.get("action")
@@ -396,6 +441,9 @@ class SuperKrakenTUI(App):
                                 qty = risk_eval.get("adjusted_quantity", proposal.get("quantity", 0.0))
                                 sl = risk_eval.get("stop_loss_price", proposal.get("stop_loss_price", 0.0))
                                 tp = proposal.get("take_profit_price", 0.0)
+
+                                if settings.is_canadian and proposal.get("leverage", 1.0) > 1.0:
+                                    self.notifications_bar.add_event("🇨🇦 Futures/leverage blocked — spot fallback", "info")
 
                                 exec_res = self.paper_engine.execute_order(
                                     symbol=symbol,
@@ -440,10 +488,10 @@ class SuperKrakenTUI(App):
                                 )
                             else:
                                 conf_int = int(consensus.get("confidence", 0) * 100) if consensus else 0
-                                self.notifications_bar.add_event(f"🟡 HOLD — Conf {conf_int}% below gate", "info")
+                                self.notifications_bar.add_event(f"🟡 HOLD {symbol} — Conf {conf_int}% below 65% gate", "info")
                         elif proposal and proposal.get("action") == "HOLD":
                             conf_int = int(consensus.get("confidence", 0) * 100) if consensus else 0
-                            self.notifications_bar.add_event(f"🟡 HOLD — Conf {conf_int}% below gate", "info")
+                            self.notifications_bar.add_event(f"🟡 HOLD {symbol} — Conf {conf_int}% below 65% gate", "info")
 
                         # Audit log
                         audit_logger.log_decision_cycle(final_state)

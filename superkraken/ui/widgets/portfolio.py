@@ -41,18 +41,17 @@ def render_ascii_curve(values: List[float], height: int = 4, width: int = 24) ->
         if curr_r == prev_r:
             grid[curr_r][c] = "─"
         elif curr_r > prev_r:
-            grid[prev_r][c] = "╭"
+            grid[prev_r][c] = "╯"
             for inter in range(prev_r + 1, curr_r):
                 grid[inter][c] = "│"
-            grid[curr_r][c] = "╯"
+            grid[curr_r][c] = "╭"
         else:
-            grid[prev_r][c] = "╰"
+            grid[prev_r][c] = "╮"
             for inter in range(curr_r + 1, prev_r):
                 grid[inter][c] = "│"
-            grid[curr_r][c] = "╮"
+            grid[curr_r][c] = "╰"
 
     lines = []
-    lines.append("Equity Curve (last 20 cycles):")
     for h in range(height - 1, -1, -1):
         thresh = min_v + h * step
         lbl = f"${thresh:>6,.0f} ┤" if h > 0 else f"${thresh:>6,.0f} ┼"
@@ -74,7 +73,7 @@ class PortfolioWidget(Static):
     def update_portfolio(self, portfolio: PortfolioState) -> None:
         self.portfolio = portfolio
         self.equity_history.append(portfolio.total_value_usd)
-        if len(self.equity_history) > 60:
+        if len(self.equity_history) > 20:
             self.equity_history.pop(0)
         self.refresh()
 
@@ -103,11 +102,19 @@ class PortfolioWidget(Static):
                 Text(pnl_text, style=style),
             )
 
-        # Multi-row ASCII equity curve
+        # Multi-row ASCII equity curve with delta calculation
         curve_str = render_ascii_curve(self.equity_history, height=4, width=22)
         initial_val = self.equity_history[0] if self.equity_history else 10000.0
         current_val = self.portfolio.total_value_usd
+        delta = current_val - initial_val
+        delta_pct = (delta / initial_val * 100) if initial_val > 0 else 0.0
+        sign = "+" if delta >= 0 else ""
+        delta_style = "bold green" if delta >= 0 else "bold red"
+
+        hdr = Text("Equity Curve (last 20):", style="bold white")
+        hdr.append(f" {sign}${delta:,.2f} ({sign}{delta_pct:.1f}%)", style=delta_style)
+
         curve_style = "bold green" if current_val >= initial_val else "bold red"
         curve_text = Text(curve_str, style=curve_style)
 
-        return Group(table, curve_text)
+        return Group(table, hdr, curve_text)

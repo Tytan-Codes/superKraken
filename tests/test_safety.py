@@ -143,3 +143,12 @@ def test_preflight_checklist():
     """Verify full 11-point preflight checklist passes."""
     passed = run_preflight_checklist("PAPER")
     assert passed is True
+
+
+def test_cli_safety_commands():
+    """Verify CLI safety test commands execute without exception."""
+    from superkraken.cli import test_circuit_breaker, test_stop_loss, test_memory
+    test_circuit_breaker()
+    test_stop_loss()
+    test_memory()
+

@@ -149,16 +149,24 @@ class AgentStatusWidget(Static):
                 status_text = Text(f"✅ COMPLETE [{model_short}]", style="bold green")
             elif state in ("FAILED", "ERROR"):
                 status_text = Text(f"❌ ERROR [{model_short}]", style="bold red")
+            elif state == "WAITING":
+                status_text = Text("⏳ WAITING", style="dim cyan")
             else:
                 status_text = Text(f"⚪ IDLE [{model_short}]", style="dim white")
 
             # Format signal text
-            if "BUY" in sig_text or "APPROVED" in sig_text or "BULL" in sig_text:
+            if state == "WAITING":
+                signal_rich = Text("-", style="dim")
+            elif "BUY" in sig_text or "APPROVED" in sig_text or "BULL" in sig_text:
                 signal_rich = Text(sig_text, style="bold green")
             elif "SELL" in sig_text or "REJECTED" in sig_text or "BEAR" in sig_text:
                 signal_rich = Text(sig_text, style="bold red")
             elif "HOLD" in sig_text:
                 signal_rich = Text(sig_text, style="bold yellow")
+            elif "HEURISTIC FALLBACK" in sig_text:
+                signal_rich = Text(sig_text, style="bold magenta")
+            elif "RESTRICTED" in sig_text:
+                signal_rich = Text(sig_text, style="bold dark_orange")
             else:
                 signal_rich = Text(sig_text, style="white")
 

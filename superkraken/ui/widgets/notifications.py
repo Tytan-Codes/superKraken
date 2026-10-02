@@ -48,7 +48,7 @@ class NotificationsBarWidget(Static):
 
         items = []
         for msg in list(self.events)[-self.max_items:]:
-            if "🚨" in msg or "circuit" in msg.lower() or "stop" in msg.lower():
+            if "🚨" in msg or "🔴" in msg or "circuit" in msg.lower() or "stop-loss" in msg.lower():
                 style = "bold red"
             elif "🟢" in msg or "filled" in msg.lower() or "buy" in msg.lower():
                 style = "bold green"

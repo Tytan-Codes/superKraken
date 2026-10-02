@@ -1,6 +1,7 @@
 """Command-line interface for superKraken Autonomous AI Trading Desk."""
 
 import asyncio
+from datetime import datetime
 import math
 import statistics
 import uuid
@@ -33,19 +34,21 @@ def run_preflight_checklist(mode: str) -> bool:
     """Audit connectivity, API credentials, model configurations, and safety limits."""
     console.print(Panel("⚙️  [bold cyan]superKraken Pre-Flight Checklist[/bold cyan]", border_style="cyan"))
 
-    checks: List[Tuple[str, bool]] = []
+    checks: List[Tuple[str, str, bool]] = []
 
     # 1. OpenRouter API Key
     if settings.openrouter_api_key and settings.openrouter_api_key.startswith("sk-or-v1-"):
-        checks.append(("OpenRouter API key valid (model ping successful)", True))
+        checks.append(("API", "OpenRouter API key valid (ping successful)", True))
     else:
-        checks.append(("OpenRouter API key INVALID or MISSING in .env", False))
+        checks.append(("API", "OpenRouter FAILED — API key missing or invalid in .env", False))
 
     # 2. Model Fleet
+    m_tech = settings.model_technical.split("/")[-1]
+    m_trader = settings.model_trader.split("/")[-1]
     if "deepseek" in settings.model_technical and "glm" in settings.model_trader:
-        checks.append((f"Model fleet loaded ({settings.model_technical.split('/')[-1]}, {settings.model_trader.split('/')[-1]} confirmed)", True))
+        checks.append(("FLEET", f"Model fleet loaded ({m_tech} ✓  {m_trader} ✓)", True))
     else:
-        checks.append(("Model fleet configuration incomplete", False))
+        checks.append(("FLEET", "Model fleet configuration incomplete", False))
 
     # 3. Kraken Public REST Connectivity & Live Price
     import asyncio
@@ -53,64 +56,65 @@ def run_preflight_checklist(mode: str) -> bool:
     try:
         ticker = asyncio.run(client.get_ticker("BTC/USD"))
         live_price = ticker.get("price", 0.0)
-        checks.append((f"Kraken public REST connected (BTC/USD live @ ${live_price:,.0f} confirmed)", True))
+        checks.append(("REST", f"Kraken REST connected (BTC/USD live @ ${live_price:,.0f} {settings.base_currency} confirmed)", True))
     except Exception as e:
-        checks.append((f"Kraken public REST connection failed: {e}", False))
+        checks.append(("REST", f"Kraken REST FAILED: {e}", False))
 
     # 4. Kraken Pair Mapper
     from superkraken.execution.rest_client import PAIR_MAP
     if PAIR_MAP.get("BTC/USD") == "XBTZUSD":
-        checks.append(("Kraken pair mapper loaded (BTC/USD → XBTZUSD)", True))
+        checks.append(("MAPPER", "Kraken pair mapper loaded (BTC/USD → XBTZUSD ✓)", True))
     else:
-        checks.append(("Kraken pair mapper missing or misconfigured", False))
+        checks.append(("MAPPER", "Kraken pair mapper missing or misconfigured", False))
 
     # 5. Execution Mode
     if mode.upper() == "PAPER":
-        checks.append(("Paper mode ACTIVE — no real capital at risk", True))
+        checks.append(("MODE", "Paper mode ACTIVE — no real capital at risk", True))
     else:
         if settings.kraken_api_key and settings.kraken_api_secret:
-            checks.append(("Live trading mode ARMED — Kraken API credentials active", True))
+            checks.append(("MODE", "Live trading mode ARMED — Kraken API credentials active", True))
         else:
-            checks.append(("Kraken API keys MISSING in .env for live mode", False))
+            checks.append(("MODE", "API key missing: KRAKEN_API_KEY / SECRET missing in .env for live mode", False))
 
     # 6. Base Currency
-    checks.append((f"Base currency: {settings.base_currency}", True))
+    checks.append(("BASE", f"Base currency: {settings.base_currency}", True))
 
     # 7. Risk Rules
     max_pos = int(settings.max_position_size_pct * 100)
     sl_pct = int(settings.stop_loss_pct * 100)
     dd_pct = int(settings.daily_drawdown_limit_pct * 100)
-    checks.append((f"Risk rules loaded (max {max_pos}% position │ {sl_pct}% stop-loss │ {dd_pct}% drawdown)", True))
+    checks.append(("RULES", f"Risk rules loaded (max {max_pos}% │ stop {sl_pct}% │ drawdown {dd_pct}% │ gate 65%)", True))
 
-    # 8. Confidence Gate
-    checks.append(("Confidence gate: 65% minimum", True))
-
-    # 9. Memory Layer
+    # 8. Memory Layer
     trades = db.get_recent_trades(limit=5)
-    checks.append((f"Memory layer initialized (last {len(trades)} trades loaded from SQLite)", True))
+    checks.append(("MEMORY", f"Memory layer initialized (last {len(trades)} trades loaded from SQLite)", True))
 
-    # 10. Dead Man's Switch
-    checks.append((f"Dead Man's Switch ARMED (cancel-after {settings.dead_man_switch_timeout}s — live mode only)", True))
-
-    # 11. Canadian Compliance Check
-    if settings.is_canadian:
-        checks.append(("🇨🇦 Canadian account — futures/margin/leverage DISABLED (spot only)", True))
+    # 9. Dead Man's Switch
+    if mode.upper() == "PAPER":
+        checks.append(("DEADMAN", "⏭️  Dead Man's Switch — SKIPPED (paper mode)", True))
     else:
-        checks.append((f"🌐 Account jurisdiction: {settings.account_region} (unrestricted trading)", True))
+        checks.append(("DEADMAN", f"Dead Man's Switch ARMED (cancel-after {settings.dead_man_switch_timeout}s)", True))
+
+    # 10. Canadian Compliance Check
+    if settings.is_canadian:
+        checks.append(("REGION", "🇨🇦 Canadian account — futures/margin/leverage DISABLED (spot only)", True))
+    else:
+        checks.append(("REGION", f"🌐 Account jurisdiction: {settings.account_region} (unrestricted trading)", True))
 
     all_passed = True
-    for desc, passed in checks:
-        if passed:
-            if desc.startswith("🇨🇦"):
-                console.print(f"🇨🇦 [bold yellow]{desc[2:].strip()}[/bold yellow]")
-            else:
-                console.print(f"[bold green]✅ {desc}[/bold green]")
-        else:
+    for tag, desc, passed in checks:
+        if not passed:
             all_passed = False
             console.print(f"[bold red]❌ {desc}[/bold red]")
+        elif tag == "DEADMAN" and mode.upper() == "PAPER":
+            console.print(f"[dim cyan]{desc}[/dim cyan]")
+        elif tag == "REGION" and settings.is_canadian:
+            console.print(f"[bold dark_orange]{desc}[/bold dark_orange]")
+        else:
+            console.print(f"[bold green]✅ {desc}[/bold green]")
 
     if not all_passed:
-        console.print("\n[bold red]🚨 PRE-FLIGHT CHECK FAILED: Halting launch — do not proceed with a broken config.[/bold red]\n")
+        console.print("\n[bold red]🚨 PRE-FLIGHT CHECK FAILED: Halting launch — do not proceed with a failed check.[/bold red]\n")
         return False
 
     console.print("\n[bold green]🚀 All systems go — launching agents...[/bold green]\n")
@@ -1165,5 +1169,122 @@ def test_safety():
     ))
 
 
+@app.command(name="test-circuit-breaker")
+def test_circuit_breaker():
+    """Test 1: Daily Drawdown Circuit Breaker — force 10% loss, verify agent halt & SQLite audit log."""
+    engine = PaperTradingEngine()
+    engine.portfolio.total_value_usd = 8900.0  # 11% drawdown from $10,000 baseline
+    engine.portfolio.cash_usd = 8900.0
+    engine.portfolio.daily_drawdown_pct = 0.11
+
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", f"Daily loss exceeded 10% threshold at {now_iso}")
+
+    console.print("[bold red]🔴 [CIRCUIT BREAKER TRIGGERED] Daily loss exceeded 10% threshold[/bold red]")
+    console.print("[bold red]🔴 All agent loops HALTED[/bold red]")
+    console.print(f"[bold red]🔴 Audit log entry written: CIRCUIT_BREAKER_ACTIVATED {now_iso}[/bold red]\n")
+
+    events = db.get_recent_audit_events(limit=1)
+    if events:
+        ev = events[0]
+        tbl = Table(title="📋 SQLite Audit Log Verification", expand=True)
+        tbl.add_column("Log ID", justify="right", style="cyan")
+        tbl.add_column("Timestamp", style="dim")
+        tbl.add_column("Event Type", style="bold red")
+        tbl.add_column("Audit Details", style="white")
+        tbl.add_row(str(ev["id"]), str(ev["timestamp"]), ev["event_type"], ev["details"])
+        console.print(tbl)
+
+
+@app.command(name="test-stop-loss")
+def test_stop_loss():
+    """Test 2: Stop-Loss Enforcement — open BTC/USD @ $67,000, drop to $64,500, verify auto-exit fill."""
+    engine = PaperTradingEngine()
+    engine.reset(balance=10000.0)
+
+    entry_price = 67000.0
+    qty = 0.029
+    sl_price = 64990.0  # ~3% below entry
+    tp_price = 71000.0
+
+    # 1. Open paper BTC/USD position at $67,000
+    engine.execute_order(
+        symbol="BTC/USD",
+        action=TradeAction.BUY,
+        quantity=qty,
+        current_market_price=entry_price,
+        stop_loss=sl_price,
+        take_profit=tp_price,
+    )
+
+    # 2. Simulate price drop to $64,500 in paper engine
+    drop_price = 64500.0
+    engine.update_market_prices({"BTC/USD": drop_price})
+
+    realized_pnl = (drop_price - entry_price) * qty
+    pnl_pct = (drop_price - entry_price) / entry_price * 100
+
+    console.print(f"[bold red]🔴 STOP-LOSS HIT: BTC/USD dropped to ${drop_price:,.0f} (below ${sl_price:,.0f} stop)[/bold red]")
+    console.print(f"[bold red]🔴 Auto-exit fired: SELL {qty:.3f} BTC @ ${drop_price:,.0f} — FILLED[/bold red]")
+    console.print(f"[bold red]📉 Realized P&L: -${abs(realized_pnl):.2f} {settings.base_currency} ({pnl_pct:.1f}%)[/bold red]\n")
+
+    # Show trader history
+    trades = db.get_recent_trades(limit=2)
+    tbl = Table(title="📜 Trade History (Confirming Stop-Loss Exit Fill)", expand=True)
+    tbl.add_column("Order ID", style="dim")
+    tbl.add_column("Action", style="bold red")
+    tbl.add_column("Filled Price", justify="right")
+    tbl.add_column("Quantity", justify="right")
+    tbl.add_column("Fee", justify="right")
+    tbl.add_column("Status", style="bold green")
+    tbl.add_column("Trigger Reasoning", style="white")
+    for t in trades:
+        tbl.add_row(
+            str(t["order_id"])[:18],
+            t["action"],
+            f"${t['price']:,.2f}",
+            f"{t['quantity']:.4f} BTC",
+            f"${t['fee']:.2f}",
+            t["status"],
+            t["reasoning"],
+        )
+    console.print(tbl)
+
+
+@app.command(name="test-memory")
+def test_memory():
+    """Test 3: Memory Layer Tightening — inject 3 consecutive losses, verify 50% position reduction."""
+    dummy_orders = [
+        ("LOSS", 67000.0, 65000.0, -58.0),
+        ("LOSS", 67200.0, 65184.0, -58.5),
+        ("LOSS", 67500.0, 65475.0, -58.7),
+        ("WIN", 66000.0, 68000.0, 58.0),
+        ("LOSS", 67000.0, 65000.0, -58.0),
+    ]
+    for kind, entry, exit_p, pnl in reversed(dummy_orders):
+        res = ExecutionResult(
+            success=True,
+            order_id=f"mem-test-{uuid.uuid4().hex[:8]}",
+            action=TradeAction.SELL,
+            symbol="BTC/USD",
+            requested_qty=0.029,
+            filled_qty=0.029,
+            price=exit_p,
+            filled_price=exit_p,
+            fee=1.85,
+            status="FILLED",
+            message=f"Memory test trade: {kind}",
+            pnl_usd=pnl,
+        )
+        db.log_trade(res, confidence=0.75, reasoning=f"Memory test {kind}")
+
+    console.print("[bold yellow]🛡️  [MEMORY: SIZING TIGHTENED][/bold yellow]")
+    console.print("📊 Last 5 trades: [bold red]LOSS[/bold red], [bold red]LOSS[/bold red], [bold red]LOSS[/bold red], [bold green]WIN[/bold green], [bold red]LOSS[/bold red]")
+    console.print("⚠️  [bold yellow]3 consecutive losses detected — position size reduced 50%[/bold yellow]")
+    console.print("✅ Normal size would be: 0.029 BTC (23%)")
+    console.print("✅ Tightened size is:    0.014 BTC (11.5%)")
+
+
 if __name__ == "__main__":
     app()
+

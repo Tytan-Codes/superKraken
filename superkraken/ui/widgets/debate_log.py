@@ -13,16 +13,22 @@ from textual.widgets import Static
 
 def highlight_trading_signals(message: str) -> Text:
     """Format and highlight trading signals and regulatory tags with explicit colors."""
+    # Clean any unparsed rich style tags from message
+    clean_message = re.sub(
+        r"\[/?(?:bold|dim|italic|underline|cyan|green|red|yellow|magenta|white|blue|dark_orange)(?:\s+[a-z0-9_]+)*\]",
+        "",
+        message,
+    )
     t = Text()
     pattern = re.compile(
-        r"(\[CIRCUIT BREAKER(?: TRIGGERED)?\]|\[HEURISTIC FALLBACK\]|\[RESTRICTED: CA\]|\bBUY\b|\bSELL\b|\bHOLD\b)"
+        r"(\[CIRCUIT BREAKER(?: TRIGGERED)?\]|\[HEURISTIC FALLBACK\]|\[RESTRICTED: CA\]|✅\s*APPROVED|\bAPPROVED\b|❌\s*REJECTED|\bREJECTED\b|\bBUY\b|\bSELL\b|\bHOLD\b)"
     )
 
     last_idx = 0
-    for match in pattern.finditer(message):
+    for match in pattern.finditer(clean_message):
         start, end = match.span()
         if start > last_idx:
-            t.append(message[last_idx:start], style="white")
+            t.append(clean_message[last_idx:start], style="white")
 
         token = match.group(1)
         if "CIRCUIT BREAKER" in token:
@@ -31,6 +37,10 @@ def highlight_trading_signals(message: str) -> Text:
             t.append(token, style="bold magenta")
         elif "RESTRICTED" in token:
             t.append(token, style="bold dark_orange")
+        elif "APPROVED" in token:
+            t.append(token, style="bold green")
+        elif "REJECTED" in token:
+            t.append(token, style="bold red")
         elif token == "BUY":
             t.append(token, style="bold green")
         elif token == "SELL":
@@ -42,8 +52,8 @@ def highlight_trading_signals(message: str) -> Text:
 
         last_idx = end
 
-    if last_idx < len(message):
-        t.append(message[last_idx:], style="white")
+    if last_idx < len(clean_message):
+        t.append(clean_message[last_idx:], style="white")
 
     return t
 
