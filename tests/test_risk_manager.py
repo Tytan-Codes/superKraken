@@ -36,7 +36,7 @@ def test_position_sizing_cap(risk_agent, base_portfolio):
         reasoning="Aggressive oversized test trade",
     )
 
-    evaluation = risk_agent.evaluate_mathematical_rules(proposal, base_portfolio)
+    evaluation = risk_agent.evaluate_mathematical_rules(proposal, base_portfolio, recent_trades=[])
     assert evaluation.approved is True
     # Capital capped to 30% = $3,000 -> 3000 / 50000 = 0.06 qty
     assert evaluation.adjusted_quantity == pytest.approx(0.06, rel=1e-3)

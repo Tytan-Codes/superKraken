@@ -47,10 +47,16 @@ class RiskManagerAgent(BaseAgent):
         if drawdown_pct >= settings.daily_drawdown_limit_pct:
             approved = False
             circuit_breaker = True
-            reasons.append(
+            msg = (
                 f"CIRCUIT BREAKER TRIGGERED: Daily drawdown ({drawdown_pct * 100:.1f}%) "
                 f"exceeds limit ({settings.daily_drawdown_limit_pct * 100:.1f}%). Halting all trades."
             )
+            reasons.append(msg)
+            try:
+                from superkraken.storage.database import db
+                db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", msg)
+            except Exception:
+                pass
             return RiskEvaluation(
                 approved=False,
                 adjusted_quantity=0.0,
@@ -119,7 +125,7 @@ class RiskManagerAgent(BaseAgent):
             adjusted_qty *= 0.5
             adjusted_pct *= 0.5
             reasons.append(
-                f"[CONSECUTIVE LOSSES DETECTED] Last {consecutive_losses} trades were losses. "
+                f"[MEMORY: SIZING TIGHTENED — 3 consecutive losses] [CONSECUTIVE LOSSES DETECTED] Last {consecutive_losses} trades were losses. "
                 f"Automatically tightened position sizing by 50% for risk preservation."
             )
 

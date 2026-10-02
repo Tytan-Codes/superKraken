@@ -8,7 +8,7 @@ from textual.widgets import Static
 
 
 class NotificationsBarWidget(Static):
-    """Scrolling notifications bar showing last 5 trading and desk events."""
+    """Scrolling notifications bar showing last 5 trading and desk events in real time."""
 
     def __init__(self, max_items: int = 5, **kwargs):
         super().__init__(**kwargs)
@@ -16,36 +16,56 @@ class NotificationsBarWidget(Static):
         self.events: deque = deque(maxlen=max_items)
         # Default starting events
         self.add_event("superKraken Desk armed and online", "info")
-        self.add_event("Risk Manager: 10% daily drawdown circuit breaker active", "info")
+        self.add_event("Risk rules active (max 25% │ 3% stop-loss │ 10% drawdown)", "info")
+        self.add_event("🇨🇦 Canadian account detected — spot only", "info")
 
     def add_event(self, message: str, level: str = "info") -> None:
-        ts = datetime.now().strftime("%H:%M:%S")
-        self.events.append((ts, message, level))
+        clean = message.strip()
+        # Ensure contextual status emoji prefix
+        if not any(clean.startswith(e) for e in ("🟢", "🔴", "🟡", "🇨🇦", "🛡️", "🚨", "⚡")):
+            if "filled" in clean.lower() or "fill" in clean.lower() or "buy" in clean.lower():
+                clean = f"🟢 {clean}"
+            elif "hold" in clean.lower():
+                clean = f"🟡 {clean}"
+            elif "sell" in clean.lower():
+                clean = f"🔴 {clean}"
+            elif "futures" in clean.lower() or "margin" in clean.lower() or "restricted" in clean.lower():
+                clean = f"🇨🇦 {clean}"
+            elif "loss" in clean.lower() or "tightened" in clean.lower() or "risk" in clean.lower():
+                clean = f"🛡️ {clean}"
+            elif "circuit" in clean.lower():
+                clean = f"🚨 {clean}"
+
+        self.events.append(clean)
         self.refresh()
 
     def render(self) -> Text:
         ticker = Text()
-        ticker.append(" 🔔 EVENTS: ", style="bold gold1")
+        ticker.append(" 🔔 ", style="bold gold1")
         if not self.events:
             ticker.append("Desk monitoring live market feeds...", style="dim")
             return ticker
 
         items = []
-        for ts, msg, lvl in list(self.events)[-self.max_items:]:
-            if lvl == "warn" or "circuit" in msg.lower() or "stop" in msg.lower():
+        for msg in list(self.events)[-self.max_items:]:
+            if "🚨" in msg or "circuit" in msg.lower() or "stop" in msg.lower():
                 style = "bold red"
-            elif lvl == "fill" or "executed" in msg.lower() or "buy" in msg.lower():
+            elif "🟢" in msg or "filled" in msg.lower() or "buy" in msg.lower():
                 style = "bold green"
+            elif "🟡" in msg or "hold" in msg.lower():
+                style = "bold yellow"
+            elif "🇨🇦" in msg or "restricted" in msg.lower():
+                style = "bold dark_orange"
+            elif "🛡️" in msg:
+                style = "cyan"
             else:
                 style = "white"
-            item = Text()
-            item.append(f"[{ts}] ", style="dim")
-            item.append(msg, style=style)
-            items.append(item)
+
+            items.append(Text(msg, style=style))
 
         for i, it in enumerate(items):
             if i > 0:
-                ticker.append(" │ ", style="dim cyan")
+                ticker.append("  │  ", style="dim cyan")
             ticker.append_text(it)
 
         return ticker

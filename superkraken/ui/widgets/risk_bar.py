@@ -36,7 +36,8 @@ class RiskBarWidget(Static):
         table.add_column(ratio=6, justify="right")
 
         # Last Trade info
-        trade_content = Text.from_markup(f"[bold cyan]{self.last_trade_text}[/bold cyan]")
+        from superkraken.ui.widgets.debate_log import highlight_trading_signals
+        trade_content = highlight_trading_signals(self.last_trade_text)
 
         # Risk Telemetry
         pnl_style = "bold green" if self.daily_pnl >= 0 else "bold red"

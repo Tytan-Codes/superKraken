@@ -70,9 +70,10 @@ class PaperTradingEngine:
         self.save()
         return self.portfolio
 
-    def update_market_prices(self, price_map: Dict[str, float]) -> None:
+    def update_market_prices(self, price_map: Dict[str, float]) -> List[ExecutionResult]:
         """Update valuations and evaluate open position stop-loss / take-profits."""
         positions_value = 0.0
+        triggered_results: List[ExecutionResult] = []
 
         for symbol, pos in list(self.portfolio.positions.items()):
             if symbol in price_map:
@@ -86,25 +87,39 @@ class PaperTradingEngine:
                 # Check Stop-Loss Trigger
                 if pos.stop_loss > 0 and current_price <= pos.stop_loss:
                     logger.warning(f"[STOP-LOSS HIT] {symbol} at ${current_price:.2f} <= SL ${pos.stop_loss:.2f}")
-                    self.execute_order(
+                    exec_res = self.execute_order(
                         symbol=symbol,
                         action=TradeAction.SELL,
                         quantity=pos.quantity,
                         current_market_price=current_price,
                         order_type=OrderType.MARKET,
                     )
+                    from superkraken.storage.database import db
+                    db.log_trade(
+                        exec_res,
+                        confidence=1.0,
+                        reasoning=f"Automatic stop-loss trigger executed at ${current_price:,.2f}",
+                    )
+                    triggered_results.append(exec_res)
                     continue
 
                 # Check Take-Profit Trigger
                 if pos.take_profit > 0 and current_price >= pos.take_profit:
                     logger.info(f"[TAKE-PROFIT HIT] {symbol} at ${current_price:.2f} >= TP ${pos.take_profit:.2f}")
-                    self.execute_order(
+                    exec_res = self.execute_order(
                         symbol=symbol,
                         action=TradeAction.SELL,
                         quantity=pos.quantity,
                         current_market_price=current_price,
                         order_type=OrderType.MARKET,
                     )
+                    from superkraken.storage.database import db
+                    db.log_trade(
+                        exec_res,
+                        confidence=1.0,
+                        reasoning=f"Automatic take-profit trigger executed at ${current_price:,.2f}",
+                    )
+                    triggered_results.append(exec_res)
                     continue
 
                 positions_value += pos.quantity * current_price
@@ -250,6 +265,7 @@ class PaperTradingEngine:
         self.save()
 
         order_id = f"paper-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        pnl_suffix = f" (Realized P&L: {'+' if realized >= 0 else ''}${realized:,.2f})" if action == TradeAction.SELL else ""
         return ExecutionResult(
             success=True,
             order_id=order_id,
@@ -259,7 +275,7 @@ class PaperTradingEngine:
             filled_qty=round(quantity, 6),
             fee=round(fee, 4),
             status="FILLED",
-            message=f"Filled {action.value} {quantity:.6f} @ ${fill_price:.2f}",
+            message=f"Filled {action.value} {quantity:.6f} @ ${fill_price:.2f}{pnl_suffix}",
         )
 
     def cancel_all_orders(self) -> int:

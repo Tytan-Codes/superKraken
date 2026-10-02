@@ -104,9 +104,47 @@ class KrakenCLIWrapper:
             args.extend(["--price", str(price)])
         return self.run_command(args)
 
+    def build_cancel_after_command(self, timeout_seconds: int = 60) -> List[str]:
+        """Construct the exact CLI command list for dead man's switch cancel-after."""
+        return [self.cli_path, "spot", "cancel-after", "--timeout", str(timeout_seconds)]
+
+    def build_spot_order_command(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        volume: float,
+        price: Optional[float] = None,
+    ) -> List[str]:
+        """Construct the exact CLI command list for placing a spot order."""
+        args = [
+            self.cli_path,
+            "spot",
+            "order",
+            "add",
+            "--pair",
+            symbol,
+            "--type",
+            side.lower(),
+            "--ordertype",
+            order_type.lower(),
+            "--volume",
+            str(volume),
+        ]
+        if price and order_type.lower() == "limit":
+            args.extend(["--price", str(price)])
+        return args
+
     def spot_cancel_after(self, timeout_seconds: int = 60) -> Dict[str, Any]:
         """Trigger dead man's switch: cancel open orders after timeout."""
         return self.run_command(["spot", "cancel-after", "--timeout", str(timeout_seconds)])
+
+    def heartbeat(self, timeout_seconds: Optional[int] = None) -> Dict[str, Any]:
+        """Send heartbeat to Kraken CLI to reset dead man's switch cancel timer."""
+        timeout = timeout_seconds or settings.dead_man_switch_timeout
+        cmd = self.build_cancel_after_command(timeout)
+        logger.info(f"Dead man's switch heartbeat dispatched: {' '.join(cmd)}")
+        return self.spot_cancel_after(timeout)
 
     def get_market_ticker(self, symbol: str) -> Dict[str, Any]:
         """Get live market ticker data."""

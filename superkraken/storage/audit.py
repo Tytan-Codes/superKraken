@@ -1,7 +1,7 @@
 """Structured JSON audit logger for agent decision chains."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 from superkraken.config import settings
@@ -16,7 +16,7 @@ class AuditLogger:
 
     def log_decision_cycle(self, state: Dict[str, Any]) -> None:
         record = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": state.get("symbol"),
             "current_price": state.get("current_price"),
             "technical_report": state.get("technical_report"),

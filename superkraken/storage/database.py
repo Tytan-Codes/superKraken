@@ -70,6 +70,16 @@ class Database:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    details TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             conn.commit()
 
     def log_trade(
@@ -160,6 +170,30 @@ class Database:
                 )
             row = cursor.fetchone()
             return row[0] if row else 0
+
+    def log_audit_event(self, event_type: str, details: str = "") -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO audit_log (event_type, details)
+                VALUES (?, ?)
+                """,
+                (event_type, details),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_recent_audit_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
 
 db = Database()

@@ -59,7 +59,7 @@ class SuperKrakenTUI(App):
         padding: 0 1;
     }
     #top-grid {
-        height: 12;
+        height: 14;
         layout: grid;
         grid-size: 3 1;
         grid-columns: 1fr 1fr 1fr;
@@ -247,8 +247,14 @@ class SuperKrakenTUI(App):
                         # Check if daily drawdown reached circuit breaker
                         if self.paper_engine.portfolio.daily_drawdown_pct >= settings.daily_drawdown_limit_pct:
                             msg = f"CIRCUIT BREAKER: {self.paper_engine.portfolio.daily_drawdown_pct * 100:.1f}% drawdown! Halting trading."
-                            self.debate_log.add_log("🛡️ Risk Manager", msg, "bold red")
-                            self.notifications_bar.add_event(f"CIRCUIT BREAKER TRIGGERED: {msg}", "warn")
+                            self.debate_log.add_log("🛡️ Risk Manager", f"[CIRCUIT BREAKER TRIGGERED] {msg}", "bold red")
+                            self.notifications_bar.add_event(f"🚨 [CIRCUIT BREAKER TRIGGERED] {msg}", "warn")
+                            db.log_audit_event("CIRCUIT_BREAKER_ACTIVATED", msg)
+                            audit_logger.log_decision_cycle({
+                                "action": "CIRCUIT_BREAKER_ACTIVATED",
+                                "reason": msg,
+                                "portfolio": self.paper_engine.portfolio.model_dump(),
+                            })
                             self.paused = True
                             break
 
@@ -312,6 +318,17 @@ class SuperKrakenTUI(App):
                         proposal = final_state.get("proposal")
                         risk_eval = final_state.get("risk_evaluation")
 
+                        # Memory layer consecutive losses notification
+                        if risk_eval:
+                            for reason in risk_eval.get("reasons", []):
+                                if "consecutive losses" in reason.lower() or "tightened" in reason.lower():
+                                    self.debate_log.add_log(
+                                        "🛡️ Risk Manager",
+                                        "[MEMORY: SIZING TIGHTENED — 3 consecutive losses] Halving position size.",
+                                        "bold yellow",
+                                    )
+                                    self.notifications_bar.add_event("🛡️ 3 losses — sizing tightened 50%", "warn")
+
                         if proposal and risk_eval and risk_eval.get("approved"):
                             action_val = proposal.get("action")
                             if action_val in ["BUY", "SELL"]:
@@ -342,10 +359,11 @@ class SuperKrakenTUI(App):
                                     trade_count=sum(self.paper_engine.portfolio.trade_count_today.values()),
                                 )
 
-                                self.notifications_bar.add_event(
-                                    f"FILL: {action_val} {qty:.4f} {symbol} @ ${exec_res.filled_price:,.2f}",
-                                    "fill",
-                                )
+                                if exec_res.success:
+                                    self.notifications_bar.add_event(
+                                        f"🟢 FILLED spot {action_val} {qty:.4f} {symbol} @ ${exec_res.filled_price:,.2f}",
+                                        "fill",
+                                    )
 
                                 self.debate_log.add_log(
                                     "⚡ Execution",
@@ -359,6 +377,12 @@ class SuperKrakenTUI(App):
                                     confidence=consensus.get("confidence", 0.0) if consensus else 0.0,
                                     reasoning=proposal.get("reasoning", ""),
                                 )
+                            else:
+                                conf_int = int(consensus.get("confidence", 0) * 100) if consensus else 0
+                                self.notifications_bar.add_event(f"🟡 HOLD — Conf {conf_int}% below gate", "info")
+                        elif proposal and proposal.get("action") == "HOLD":
+                            conf_int = int(consensus.get("confidence", 0) * 100) if consensus else 0
+                            self.notifications_bar.add_event(f"🟡 HOLD — Conf {conf_int}% below gate", "info")
 
                         # Audit log
                         audit_logger.log_decision_cycle(final_state)

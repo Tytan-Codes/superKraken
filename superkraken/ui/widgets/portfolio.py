@@ -1,6 +1,8 @@
-"""Textual widget for portfolio balances, open positions, and equity curve sparkline."""
+"""Textual widget for portfolio balances, open positions, and ASCII equity curve."""
 
 from typing import Any, Dict, List
+from rich.console import Group
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
@@ -8,26 +10,58 @@ from superkraken.config import settings
 from superkraken.state import PortfolioState
 
 
-def render_sparkline(values: List[float], width: int = 18) -> str:
-    """Render a unicode sparkline curve from a series of floats."""
+def render_ascii_curve(values: List[float], height: int = 4, width: int = 24) -> str:
+    """Render a multi-row stepped ASCII equity curve with threshold labels."""
     if not values:
-        return "─" * width
+        return "Equity curve standby..."
     pts = values[-width:]
+    if len(pts) < 2:
+        pts = [pts[0]] * width
+
     min_v = min(pts)
     max_v = max(pts)
-    if max_v == min_v:
-        return "▄" * len(pts)
-    bars = [" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-    curve = []
-    for v in pts:
-        norm = (v - min_v) / (max_v - min_v)
-        idx = min(int(norm * (len(bars) - 1)), len(bars) - 1)
-        curve.append(bars[idx])
-    return "".join(curve)
+    if min_v == max_v:
+        max_v = min_v + 10.0
+        min_v = min_v - 10.0
+
+    step = (max_v - min_v) / (height - 1) if height > 1 else 1.0
+
+    # Resample or pad points to match target width
+    if len(pts) < width:
+        pts = [pts[0]] * (width - len(pts)) + pts
+
+    row_pts = [int(round((v - min_v) / (max_v - min_v) * (height - 1))) for v in pts]
+
+    grid = [[" " for _ in range(width)] for _ in range(height)]
+
+    for c in range(width):
+        curr_r = max(0, min(height - 1, row_pts[c]))
+        prev_r = max(0, min(height - 1, row_pts[c - 1])) if c > 0 else curr_r
+
+        if curr_r == prev_r:
+            grid[curr_r][c] = "─"
+        elif curr_r > prev_r:
+            grid[prev_r][c] = "╭"
+            for inter in range(prev_r + 1, curr_r):
+                grid[inter][c] = "│"
+            grid[curr_r][c] = "╯"
+        else:
+            grid[prev_r][c] = "╰"
+            for inter in range(curr_r + 1, prev_r):
+                grid[inter][c] = "│"
+            grid[curr_r][c] = "╮"
+
+    lines = []
+    lines.append("Equity Curve (last 20 cycles):")
+    for h in range(height - 1, -1, -1):
+        thresh = min_v + h * step
+        lbl = f"${thresh:>6,.0f} ┤" if h > 0 else f"${thresh:>6,.0f} ┼"
+        lines.append(lbl + "".join(grid[h]))
+    return "\n".join(lines)
 
 
 class PortfolioWidget(Static):
-    """Renders active positions, allocation %, unrealized P&L, and equity sparkline."""
+    """Renders active positions, allocation %, unrealized P&L, and equity curve."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -44,11 +78,11 @@ class PortfolioWidget(Static):
             self.equity_history.pop(0)
         self.refresh()
 
-    def render(self) -> Table:
-        table = Table(title="💰 PORTFOLIO & EQUITY CURVE", expand=True, box=None, padding=(0, 1))
+    def render(self) -> Group:
+        table = Table(title=f"💰 PORTFOLIO ({settings.base_currency})", expand=True, box=None, padding=(0, 1))
         table.add_column("Asset", style="bold magenta")
         table.add_column("Size", justify="right")
-        table.add_column("Unrealized P&L", justify="right")
+        table.add_column("P&L", justify="right")
 
         table.add_row(
             f"{settings.base_currency} Cash",
@@ -69,15 +103,11 @@ class PortfolioWidget(Static):
                 Text(pnl_text, style=style),
             )
 
-        # Sparkline row
-        spark = render_sparkline(self.equity_history, width=18)
+        # Multi-row ASCII equity curve
+        curve_str = render_ascii_curve(self.equity_history, height=4, width=22)
         initial_val = self.equity_history[0] if self.equity_history else 10000.0
         current_val = self.portfolio.total_value_usd
-        spark_style = "bold green" if current_val >= initial_val else "bold red"
-        table.add_row(
-            Text("Curve (20c)", style="dim cyan"),
-            Text(f"${current_val:,.1f}", style="bold white"),
-            Text(spark, style=spark_style),
-        )
+        curve_style = "bold green" if current_val >= initial_val else "bold red"
+        curve_text = Text(curve_str, style=curve_style)
 
-        return table
+        return Group(table, curve_text)
