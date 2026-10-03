@@ -150,29 +150,47 @@ def run_preflight_checklist(mode: str) -> bool:
     return True
 
 
+@app.command(name="copilot")
+def copilot(
+    mode: str = typer.Option("paper", "--mode", "-m", help="Trading mode: 'paper' or 'live'"),
+):
+    """Launch the superKraken AI Trading Copilot TUI."""
+    from superkraken.ui.copilot_app import SuperKrakenCopilotApp
+
+    if not run_preflight_checklist(mode.upper()):
+        raise typer.Exit(code=1)
+
+    tui = SuperKrakenCopilotApp()
+    tui.run()
+
+
 @app.command()
 def start(
     mode: str = typer.Option("paper", "--mode", "-m", help="Trading mode: 'paper' or 'live'"),
     live: bool = typer.Option(False, "--live", help="Shortcut for live execution mode"),
+    legacy: bool = typer.Option(False, "--legacy", help="Run legacy autonomous trading desk instead of copilot"),
 ):
-    """Launch all agents and begin autonomous trading loop in the Textual TUI."""
-    from superkraken.ui.app import SuperKrakenTUI
-
+    """Launch superKraken (defaults to AI Copilot TUI)."""
     chosen_mode = "LIVE" if live else mode.upper()
     if not run_preflight_checklist(chosen_mode):
         raise typer.Exit(code=1)
 
-    tui = SuperKrakenTUI(mode=chosen_mode)
-    tui.run()
+    if legacy:
+        from superkraken.ui.app import SuperKrakenTUI
+        tui = SuperKrakenTUI(mode=chosen_mode)
+        tui.run()
+    else:
+        from superkraken.ui.copilot_app import SuperKrakenCopilotApp
+        tui = SuperKrakenCopilotApp()
+        tui.run()
 
 
 @app.command()
 def paper(
     reset: bool = typer.Option(False, "--reset", help="Reset paper portfolio to initial $10,000 balance"),
+    legacy: bool = typer.Option(False, "--legacy", help="Run legacy autonomous trading desk"),
 ):
-    """Run in safe paper trading sandbox mode with live TUI."""
-    from superkraken.ui.app import SuperKrakenTUI
-
+    """Run superKraken Copilot in paper sandbox mode with live TUI."""
     if reset:
         engine = PaperTradingEngine()
         engine.reset()
@@ -181,11 +199,14 @@ def paper(
     if not run_preflight_checklist("PAPER"):
         raise typer.Exit(code=1)
 
-    console.print("[dim cyan]ℹ️  No real USDC balance detected — using simulated $10,000 USDC for paper mode[/dim cyan]")
-    console.print("[dim yellow]💡 Deposit real USDC to paper trade against your actual account size[/dim yellow]\n")
-
-    tui = SuperKrakenTUI(mode="PAPER")
-    tui.run()
+    if legacy:
+        from superkraken.ui.app import SuperKrakenTUI
+        tui = SuperKrakenTUI(mode="PAPER")
+        tui.run()
+    else:
+        from superkraken.ui.copilot_app import SuperKrakenCopilotApp
+        tui = SuperKrakenCopilotApp()
+        tui.run()
 
 
 @app.command(name="smoke-test")
@@ -608,6 +629,285 @@ def history(
             )
 
     console.print(table)
+
+
+@app.command(name="scan")
+def scan(
+    symbol: Optional[str] = typer.Argument(None, help="Trading pair to scan (e.g. BTC/USD, ETH/USD, or empty for all)"),
+    confidence: float = typer.Option(0.62, "--confidence", "-c", help="Minimum confidence threshold"),
+):
+    """Scan market with 8 AI agents and show trade recommendations with exact dollar risk."""
+    from superkraken.copilot.scanner import CopilotScanner
+    scanner = CopilotScanner()
+
+    async def _do_scan():
+        console.print(Panel(f"🔍 [bold cyan]superKraken 8-Agent Copilot Scanner[/bold cyan] (Min Confidence: {confidence*100:.0f}%)", border_style="cyan"))
+        pairs_to_scan = [symbol.upper()] if symbol else settings.pairs_list
+        usdc_bal = await scanner.get_live_portfolio_usdc()
+        console.print(f"[bold green]Live USDC Capital Available:[/] ${usdc_bal:,.2f} USDC\n")
+
+        for sym in pairs_to_scan:
+            with console.status(f"[bold yellow]Running 8-agent analysis on {sym}...[/bold yellow]"):
+                res, alert = await scanner.scan_symbol(sym, min_confidence=confidence, portfolio_usdc=usdc_bal)
+
+            act = res.get("action", "HOLD")
+            conf = res.get("confidence", 0.0)
+            act_color = "bold green" if act == "BUY" else ("bold red" if act == "SELL" else "bold yellow")
+            console.print(f"[bold]{sym}[/bold] ➔ [{act_color}]{act}[/{act_color}] ({conf*100:.1f}% Confidence) | Price: ${res['current_price']:,.2f}")
+            console.print(f"  [dim]Consensus:[/] {res.get('summary')}")
+
+            if alert:
+                order = alert.suggested_order
+                risk = alert.risk_metrics
+                alert_panel = (
+                    f"[{act_color}]🚨 HIGH-CONVICTION ALERT: {alert.action.value} {alert.symbol} ({alert.confidence*100:.0f}%)[/{act_color}]\n\n"
+                    f"[bold cyan]Actionable Kraken Pro Order Specification:[/bold cyan]\n"
+                    f"  • Order Type:      [bold]LIMIT {alert.action.value}[/bold]\n"
+                    f"  • Limit Price:     [bold]${order.get('limit_entry_price', 0):,.2f}[/bold]\n"
+                    f"  • Position Size:   [bold]{order.get('quantity', 0):.4f} {sym.split('/')[0]}[/bold] (${order.get('notional_usdc', 0):,.2f} USDC, {order.get('position_pct', 0)*100:.1f}% equity)\n"
+                    f"  • Stop-Loss (1.5x ATR): [bold red]${order.get('stop_loss', 0):,.2f}[/bold red] (-{order.get('stop_loss_pct', 0):.2f}%)\n"
+                    f"  • Take-Profit (2:1 R:R): [bold green]${order.get('take_profit', 0):,.2f}[/bold green] (+{order.get('take_profit_pct', 0):.2f}%)\n\n"
+                    f"[bold yellow]Exact Dollar Risk & Return Profile:[/bold yellow]\n"
+                    f"  • Max Loss:        [bold red]${risk.get('max_loss_usd', 0):,.2f} USDC[/bold red] ({risk.get('max_loss_pct', 0):.1f}% of portfolio)\n"
+                    f"  • Target Gain:     [bold green]${risk.get('target_gain_usd', 0):,.2f} USDC[/bold green] ({risk.get('target_gain_pct', 0):.1f}% of portfolio)\n"
+                    f"  • Risk/Reward:     [bold cyan]1 : {risk.get('risk_reward_ratio', 2.0):.1f}[/bold cyan]\n\n"
+                    f"[bold]Operator Execution Instructions:[/bold]\n"
+                    f"  1. Go to Kraken Pro ({alert.symbol})\n"
+                    f"  2. Place LIMIT {alert.action.value} at ${order.get('limit_entry_price', 0):,.2f}\n"
+                    f"  3. Set Stop-Loss exit order at ${order.get('stop_loss', 0):,.2f}\n"
+                    f"  4. Run [bold green]trader log-trade --symbol {alert.symbol} --side {alert.action.value} --price {order.get('entry_price', 0)} --size {order.get('quantity', 0)} --sl {order.get('stop_loss', 0)} --tp {order.get('take_profit', 0)}[/bold green]"
+                )
+                console.print(Panel(alert_panel, border_style="green" if act == "BUY" else "red"))
+            else:
+                console.print(f"  [dim]Result: Confidence {conf*100:.0f}% did not meet {confidence*100:.0f}% alert gate.[/dim]\n")
+
+    asyncio.run(_do_scan())
+
+
+@app.command(name="log-trade")
+def log_trade(
+    symbol: str = typer.Option(..., "--symbol", "-s", prompt="Trading Pair (e.g. BTC/USD)"),
+    side: str = typer.Option(..., "--side", prompt="Order Side (BUY/SELL)"),
+    price: float = typer.Option(..., "--price", "-p", prompt="Fill Price in USD"),
+    size: float = typer.Option(..., "--size", prompt="Position Size in units"),
+    stop_loss: Optional[float] = typer.Option(None, "--stop-loss", "-sl", help="Stop loss price"),
+    take_profit: Optional[float] = typer.Option(None, "--take-profit", "-tp", help="Take profit price"),
+    notes: Optional[str] = typer.Option(None, "--notes", help="Optional trade notes"),
+):
+    """Log an executed Kraken Pro trade for real-time tracking and SL/TP alerts."""
+    from superkraken.state import TrackedPosition
+    sym = symbol.upper()
+    act = side.upper()
+    if act not in ("BUY", "SELL"):
+        console.print("[bold red]Invalid side. Must be BUY or SELL.[/bold red]")
+        raise typer.Exit(code=1)
+
+    pos = TrackedPosition(
+        symbol=sym,
+        side=act,
+        entry_price=price,
+        current_price=price,
+        position_size=size,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        status="OPEN",
+        notes=notes or "Manually logged via CLI",
+    )
+    pos_id = db.create_manual_position(pos)
+    sl_str = f"• Stop-Loss: ${stop_loss:,.2f}\n" if stop_loss else "• Stop-Loss: None\n"
+    tp_str = f"• Take-Profit: ${take_profit:,.2f}" if take_profit else "• Take-Profit: None"
+    console.print(Panel(
+        f"[bold green]✅ Trade Logged Successfully (Position ID #{pos_id})[/bold green]\n\n"
+        f"• Pair: [bold]{sym}[/bold]\n"
+        f"• Side: [bold]{act}[/bold]\n"
+        f"• Entry Fill: ${price:,.2f}\n"
+        f"• Units: {size:,.4f}\n"
+        f"• Total Value: ${price * size:,.2f} USD\n"
+        f"{sl_str}"
+        f"{tp_str}",
+        border_style="green",
+    ))
+
+
+@app.command(name="positions")
+def positions(
+    all_positions: bool = typer.Option(False, "--all", "-a", help="Show both open and closed positions"),
+):
+    """Display positions tracked by superKraken Copilot with live market pricing."""
+    client = KrakenMarketDataClient()
+
+    async def _fetch():
+        pos_list = db.get_all_manual_positions() if all_positions else db.get_open_positions()
+        table = Table(title="📊 superKraken Tracked Positions (Kraken Pro)", expand=True)
+        table.add_column("ID", justify="right")
+        table.add_column("Symbol", style="bold yellow")
+        table.add_column("Side")
+        table.add_column("Size", justify="right")
+        table.add_column("Entry Price", justify="right")
+        table.add_column("Current / Exit", justify="right")
+        table.add_column("P&L ($ / %)", justify="right")
+        table.add_column("Stop-Loss", justify="right")
+        table.add_column("Take-Profit", justify="right")
+        table.add_column("Status")
+
+        if not pos_list:
+            table.add_row("-", "No positions tracked", "-", "-", "-", "-", "-", "-", "-", "-")
+        else:
+            for p in pos_list:
+                cur_p = p.current_price
+                if p.status == "OPEN":
+                    try:
+                        ticker = await client.get_ticker(p.symbol)
+                        cur_p = float(ticker["price"])
+                    except Exception:
+                        pass
+                pnl_usd = (cur_p - p.entry_price) * p.position_size if p.side == "BUY" else (p.entry_price - cur_p) * p.position_size
+                pnl_pct = ((cur_p - p.entry_price) / p.entry_price * 100) if p.side == "BUY" else ((p.entry_price - cur_p) / p.entry_price * 100)
+                pnl_style = "bold green" if pnl_usd >= 0 else "bold red"
+                side_style = "bold green" if p.side == "BUY" else "bold red"
+                status_style = "bold green" if p.status == "OPEN" else "dim"
+
+                table.add_row(
+                    str(p.id or "-"),
+                    p.symbol,
+                    f"[{side_style}]{p.side}[/{side_style}]",
+                    f"{p.position_size:,.4f}",
+                    f"${p.entry_price:,.2f}",
+                    f"${cur_p:,.2f}",
+                    f"[{pnl_style}]${pnl_usd:+,.2f} ({pnl_pct:+.2f}%)[/{pnl_style}]",
+                    f"${p.stop_loss:,.2f}" if p.stop_loss else "-",
+                    f"${p.take_profit:,.2f}" if p.take_profit else "-",
+                    f"[{status_style}]{p.status}[/{status_style}]",
+                )
+        console.print(table)
+
+    asyncio.run(_fetch())
+
+
+@app.command(name="close-position")
+def close_position(
+    position_id: int = typer.Argument(..., help="ID of position to close"),
+    exit_price: Optional[float] = typer.Option(None, "--price", "-p", help="Exit price (defaults to live price)"),
+    reason: str = typer.Option("MANUAL", "--reason", "-r", help="Reason: MANUAL, STOP_LOSS, TAKE_PROFIT"),
+):
+    """Mark a tracked position as closed on Kraken Pro."""
+    client = KrakenMarketDataClient()
+
+    async def _close():
+        open_pos = db.get_open_positions()
+        target = next((p for p in open_pos if p.id == position_id), None)
+        if not target:
+            console.print(f"[bold red]Open position #{position_id} not found.[/bold red]")
+            return
+
+        price = exit_price
+        if price is None:
+            ticker = await client.get_ticker(target.symbol)
+            price = float(ticker["price"])
+
+        db.close_manual_position(position_id, exit_price=price, exit_reason=reason.upper())
+        pnl = (price - target.entry_price) * target.position_size if target.side == "BUY" else (target.entry_price - price) * target.position_size
+        pnl_pct = ((price - target.entry_price) / target.entry_price * 100) if target.side == "BUY" else ((target.entry_price - price) / target.entry_price * 100)
+        pnl_style = "bold green" if pnl >= 0 else "bold red"
+        console.print(f"[bold green]Position #{position_id} ({target.symbol}) closed at ${price:,.2f}.[/bold green]")
+        console.print(f"Realized P&L: [{pnl_style}]${pnl:+,.2f} ({pnl_pct:+.2f}%)[/{pnl_style}]")
+
+    asyncio.run(_close())
+
+
+@app.command(name="performance")
+def performance():
+    """Track Copilot performance: Operator [Y] trades vs. Skipped [N] signals to measure human alpha."""
+    stats = db.get_copilot_performance_stats()
+
+    # User Trades Table
+    user_trades = stats.get("total_user_trades", 0)
+    user_wins = stats.get("user_wins", 0)
+    user_losses = stats.get("user_losses", 0)
+    user_wr = stats.get("user_win_rate_pct", 0.0)
+    user_pnl = stats.get("total_realized_pnl", 0.0)
+
+    # Skipped Signals
+    skipped_total = stats.get("total_skipped_signals", 0)
+    good_skips = stats.get("good_skips", 0)
+    missed_wins = stats.get("missed_opportunities", 0)
+    good_skip_pct = (good_skips / skipped_total * 100) if skipped_total > 0 else 0.0
+
+    # AI Raw Signals
+    total_signals = stats.get("total_signals", 0)
+    signal_wins = stats.get("signal_wins", 0)
+    signal_losses = stats.get("signal_losses", 0)
+    signal_wr = stats.get("signal_win_rate_pct", 0.0)
+
+    pnl_style = "bold green" if user_pnl >= 0 else "bold red"
+    alpha_wr = user_wr - signal_wr
+
+    console.print(Panel("🧠 [bold cyan]superKraken Copilot: Human Operator vs. AI Signal Alpha[/bold cyan]", border_style="cyan"))
+
+    table1 = Table(title="🎯 Trades You Accepted [Y] (Realized on Kraken Pro)", expand=True)
+    table1.add_column("Metric", style="bold white")
+    table1.add_column("Value", justify="right")
+    table1.add_row("Total Executed Trades", str(user_trades))
+    table1.add_row("Winning Trades", f"[bold green]{user_wins}[/bold green]")
+    table1.add_row("Losing Trades", f"[bold red]{user_losses}[/bold red]")
+    table1.add_row("Operator Win Rate", f"[bold cyan]{user_wr:.1f}%[/bold cyan]")
+    table1.add_row("Net Realized P&L", f"[{pnl_style}]${user_pnl:+,.2f} USDC[/{pnl_style}]")
+    console.print(table1)
+
+    table2 = Table(title="🛡️ Signals You Skipped [N] (Audited Outcome)", expand=True)
+    table2.add_column("Metric", style="bold white")
+    table2.add_column("Value", justify="right")
+    table2.add_row("Total Skipped Signals", str(skipped_total))
+    table2.add_row("Good Skips (Signal Hit Loss)", f"[bold green]{good_skips}[/bold green] (Saved Capital ✓)")
+    table2.add_row("Missed Opportunities (Signal Hit Target)", f"[bold yellow]{missed_wins}[/bold yellow]")
+    table2.add_row("Skip Accuracy", f"[bold cyan]{good_skip_pct:.1f}%[/bold cyan]")
+    console.print(table2)
+
+    table3 = Table(title="📈 Human Judgment Alpha vs. Raw AI Signals", expand=True)
+    table3.add_column("Comparison", style="bold white")
+    table3.add_column("Raw AI Signals Alone", justify="right")
+    table3.add_column("You + AI Copilot", justify="right", style="bold green")
+    table3.add_column("Human Alpha", justify="right")
+
+    alpha_style = "bold green" if alpha_wr >= 0 else "bold red"
+    table3.add_row(
+        "Win Rate",
+        f"{signal_wr:.1f}% ({signal_wins}W / {signal_losses}L)",
+        f"{user_wr:.1f}% ({user_wins}W / {user_losses}L)",
+        f"[{alpha_style}]{alpha_wr:+.1f}%[/{alpha_style}]",
+    )
+    table3.add_row(
+        "Loss Avoidance",
+        f"{signal_losses} losses taken",
+        f"{good_skips} losses dodged",
+        f"[bold green]+{good_skips} bad trades avoided[/bold green]",
+    )
+    console.print(table3)
+
+
+@app.command(name="alert")
+def alert(
+    symbol: str = typer.Argument(..., help="Symbol (e.g. BTC/USD)"),
+    price: float = typer.Argument(..., help="Target price to trigger alert"),
+    direction: str = typer.Option("ABOVE", "--dir", "-d", help="Direction: 'ABOVE' or 'BELOW'"),
+    notes: str = typer.Option("", "--notes", help="Alert notes"),
+):
+    """Set a custom price alert monitored by superKraken."""
+    from superkraken.state import PriceAlert
+    sym = symbol.upper()
+    dir_val = direction.upper()
+    if dir_val not in ("ABOVE", "BELOW"):
+        console.print("[bold red]Direction must be ABOVE or BELOW[/bold red]")
+        raise typer.Exit(code=1)
+
+    pa = PriceAlert(
+        symbol=sym,
+        target_price=price,
+        direction=dir_val,
+        notes=notes,
+    )
+    aid = db.create_price_alert(pa)
+    console.print(f"[bold green]✅ Price Alert #{aid} created for {sym} when price crosses {dir_val} ${price:,.2f}[/bold green]")
 
 
 def render_ascii_curve(equity_points: list[float], height: int = 7, width: int = 48) -> str:
