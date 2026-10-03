@@ -107,6 +107,8 @@ class CopilotScanner:
     def __init__(self):
         self.client = KrakenMarketDataClient()
         self.cached_portfolio_usdc: float = 10000.0
+        self.on_progress = None
+        self.on_pair_scanned = None
 
     async def get_live_portfolio_usdc(self) -> float:
         """Fetch live USDC balance from Kraken Private API /0/private/Balance."""
@@ -136,14 +138,28 @@ class CopilotScanner:
         """
         Run full 8-agent analysis on a single asset and generate SignalAlert if confidence >= min_confidence.
         """
+        from superkraken.indicators.technical import compute_all_indicators
+
         if portfolio_usdc is None:
             portfolio_usdc = await self.get_live_portfolio_usdc()
+
+        if self.on_progress:
+            self.on_progress(symbol, "FEED", f"Querying live Kraken order book and 15m candles for {symbol}...")
 
         # 1. Fetch live ticker, OHLCV, and order book depth
         ticker = await self.client.get_ticker(symbol)
         current_price = float(ticker["price"])
         candles = await self.client.get_ohlc(symbol, interval_minutes=15, count=100)
         order_book = await self.client.get_order_book_depth(symbol)
+
+        # Immediate local technical indicator computation (<10ms)
+        local_ind = compute_all_indicators(candles)
+        if self.on_progress:
+            self.on_progress(
+                symbol,
+                "INDICATORS",
+                f"RSI: {local_ind.rsi_14:.1f} │ MACD: {local_ind.macd_histogram:+.2f} │ Regime: {local_ind.trend_regime}",
+            )
 
         # 2. Assemble Graph State
         state = {
@@ -161,8 +177,31 @@ class CopilotScanner:
             "agent_states": {},
         }
 
-        # 3. Execute LangGraph workflow
-        res = await trading_graph.ainvoke(state)
+        if self.on_progress:
+            self.on_progress(symbol, "AGENTS", f"8 AI Agents running adversarial debate on {symbol}...")
+
+        # 3. Execute LangGraph workflow with streaming node updates
+        res = dict(state)
+        agent_labels = {
+            "technical_analyst": "📊 Technical Analyst (RSI & MACD computed)",
+            "sentiment_analyst": "🗞️ Sentiment Analyst (Liquidity & Momentum)",
+            "fundamental_analyst": "🏦 Fundamental Analyst (Order Book & Flows)",
+            "bull_researcher": "🐂 Bull Researcher (Building Upside Thesis)",
+            "bear_researcher": "🐻 Bear Researcher (Auditing Downside Risks)",
+            "debate_consensus": "⚖️ Consensus Node (Debating Bull vs Bear)",
+            "execution_trader": "🎯 Execution Trader (Drafting Order Spec)",
+            "risk_manager": "🛡️ Risk Manager (1% Max Loss Risk Gate)",
+        }
+
+        async for event in trading_graph.astream(state):
+            for node_name, node_output in event.items():
+                res.update(node_output)
+                if self.on_progress:
+                    label = agent_labels.get(node_name, node_name)
+                    try:
+                        self.on_progress(symbol, node_name, label)
+                    except Exception as pe:
+                        logger.debug(f"on_progress error: {pe}")
 
         ta = res.get("technical_report") or {}
         indicators = res.get("indicators") or {}
@@ -276,7 +315,9 @@ class CopilotScanner:
         """
         Scan all configured trading pairs. Returns list of summaries and top active alert if any.
         """
-        symbols = pairs or settings.pairs_list
+        raw_symbols = pairs or settings.pairs_list
+        # Scan BTC/USD first so the operator gets immediate recommendations
+        symbols = ["BTC/USD"] + [s for s in raw_symbols if s != "BTC/USD"]
         portfolio_usdc = await self.get_live_portfolio_usdc()
 
         summaries = []
@@ -285,6 +326,14 @@ class CopilotScanner:
         for sym in symbols:
             summary, alert = await self.scan_symbol(sym, min_confidence=min_confidence, portfolio_usdc=portfolio_usdc)
             summaries.append(summary)
+
+            # Trigger immediate UI update as soon as this asset completes
+            if self.on_pair_scanned:
+                try:
+                    self.on_pair_scanned(summary, alert)
+                except Exception as e:
+                    logger.debug(f"on_pair_scanned error: {e}")
+
             if alert:
                 if (
                     highest_conviction_alert is None

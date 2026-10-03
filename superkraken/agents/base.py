@@ -117,8 +117,8 @@ class BaseAgent:
                 model=model,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=6000,
-                timeout=50.0,
+                max_tokens=4000,
+                timeout=12.0,
             )
             msg = response.choices[0].message
             content = msg.content or ""
@@ -154,8 +154,8 @@ class BaseAgent:
                     model=model,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=6000,
-                    timeout=50.0,
+                    max_tokens=4000,
+                    timeout=10.0,
                 )
                 msg = response.choices[0].message
                 content = msg.content or ""
@@ -189,8 +189,8 @@ class BaseAgent:
                         model=fallback_model,
                         messages=messages,
                         temperature=temperature,
-                        max_tokens=4000,
-                        timeout=30.0,
+                        max_tokens=2000,
+                        timeout=8.0,
                     )
                     msg = response.choices[0].message
                     content = msg.content or ""

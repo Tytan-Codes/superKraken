@@ -23,6 +23,13 @@ class ActiveSignalAlertWidget(Static):
         super().__init__(**kwargs)
         self.active_alert: Optional[SignalAlert] = None
         self._last_alert_id: Optional[str] = None
+        self.radar_status: Optional[str] = None
+
+    def set_radar_status(self, status: Optional[str]) -> None:
+        """Update live desk activity shown in the alert panel when standing by."""
+        self.radar_status = status
+        if not self.active_alert:
+            self.refresh()
 
     def set_alert(self, alert: Optional[SignalAlert]) -> None:
         self.active_alert = alert
@@ -46,6 +53,8 @@ class ActiveSignalAlertWidget(Static):
             content = Text()
             content.append("\n  🔔 ", style="bold cyan")
             content.append("ADVISOR RADAR ACTIVE — Watching The Markets\n\n", style="bold white")
+            if self.radar_status:
+                content.append(f"  ⚡ DESK FOCUS: {self.radar_status}\n\n", style="bold yellow")
             content.append("  I am continuously monitoring BTC/USD, ETH/USD, and SOL/USD with 8 AI agents.\n", style="dim")
             content.append("  When the desk finds a high-probability trade with ", style="dim")
             content.append("62%+ confidence", style="bold yellow")

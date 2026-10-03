@@ -10,6 +10,8 @@ from textual.widgets import Static
 class AgentSignalsWidget(Static):
     """Displays multi-pair agent signals and live next scan countdown."""
 
+    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.signals: Dict[str, Dict[str, Any]] = {
@@ -19,6 +21,17 @@ class AgentSignalsWidget(Static):
         }
         self.seconds_until_next_scan: int = 300
         self.is_scanning: bool = False
+        self.active_symbol: str = "BTC/USD"
+        self.active_agent_msg: str = "Ready"
+        self._spinner_idx: int = 0
+
+    def set_agent_activity(self, symbol: str, message: str) -> None:
+        """Update live agent progress text and cycle spinner."""
+        self.active_symbol = symbol.replace("XXBTZUSD", "BTC/USD").replace("XETHZUSD", "ETH/USD")
+        self.active_agent_msg = message
+        self.is_scanning = True
+        self._spinner_idx += 1
+        self.refresh()
 
     def update_signal(self, symbol: str, action: str, confidence: float) -> None:
         short_sym = symbol.replace("XXBTZUSD", "BTC/USD").replace("XETHZUSD", "ETH/USD")
@@ -40,15 +53,21 @@ class AgentSignalsWidget(Static):
 
     def update_scan_timer(self, seconds_left: int) -> None:
         self.seconds_until_next_scan = max(0, seconds_left)
+        if self.is_scanning:
+            self._spinner_idx += 1
         self.refresh()
 
     def set_scanning(self, is_scanning: bool) -> None:
         self.is_scanning = is_scanning
+        if not is_scanning:
+            self.active_agent_msg = "Scan complete — listening"
         self.refresh()
 
     def update_countdown(self, seconds_left: int, is_scanning: bool = False) -> None:
         self.seconds_until_next_scan = max(0, seconds_left)
         self.is_scanning = is_scanning
+        if is_scanning:
+            self._spinner_idx += 1
         self.refresh()
 
     def render(self) -> Table:
@@ -71,15 +90,17 @@ class AgentSignalsWidget(Static):
 
             table.add_row(short_label, sig_text, f"{conf}% conf")
 
-        # Countdown row
+        # Countdown & Activity rows
+        spin = self.SPINNER_FRAMES[self._spinner_idx % len(self.SPINNER_FRAMES)]
         mins = self.seconds_until_next_scan // 60
         secs = self.seconds_until_next_scan % 60
+
         if self.is_scanning:
-            status_text = Text("⠸ Scanning agents...", style="bold cyan")
+            act_text = Text(f"{spin} [{self.active_symbol}] {self.active_agent_msg}", style="bold cyan")
         else:
-            status_text = Text(f"⏱️ Next scan: {mins}:{secs:02d}", style="dim cyan")
+            act_text = Text(f"⏱️ Next scan: {mins}:{secs:02d}", style="dim cyan")
 
         table.add_row("", "", "")
-        table.add_row("Status", status_text, Text("[S] Scan Now", style="dim yellow"))
+        table.add_row("Desk", act_text, Text("[S] Scan Now", style="dim yellow"))
 
         return table

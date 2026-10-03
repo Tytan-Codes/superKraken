@@ -6,7 +6,7 @@ and generate real-time recommendations, while the operator retains 100% executio
 
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container, Grid, Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Static
@@ -65,10 +65,15 @@ class SignalHistoryWidget(Static):
         yield self.table
 
     def on_mount(self) -> None:
-        self.table.add_columns("Time", "Symbol", "Signal", "Conf", "Max Loss", "Action", "Outcome")
+        if not self.table.columns:
+            self.table.add_columns("Time", "Symbol", "Signal", "Conf", "Max Loss", "Action", "Outcome")
         self.refresh_signals()
 
     def refresh_signals(self) -> None:
+        if not self.is_mounted:
+            return
+        if not self.table.columns:
+            self.table.add_columns("Time", "Symbol", "Signal", "Conf", "Max Loss", "Action", "Outcome")
         self.table.clear()
         signals = db.get_recent_signals(limit=12)
         for s in signals:
@@ -180,8 +185,13 @@ class SuperKrakenCopilotApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
-        """Start background scan and monitoring tasks."""
+        """Start background scan and monitoring tasks with instant cold-start."""
         self.notifications_bar.add_event("superKraken Copilot initialized in Canadian Spot mode", "info")
+
+        # Wire streaming callbacks
+        self.scanner.on_progress = self._handle_scan_progress
+        self.scanner.on_pair_scanned = self._handle_pair_scanned
+
         # Initialize USDC balance
         bal = await self.scanner.get_live_portfolio_usdc()
         open_pos = db.get_open_positions()
@@ -189,12 +199,62 @@ class SuperKrakenCopilotApp(App):
         self.header_widget.update_metrics(bal, len(open_pos), stats.get("total_realized_pnl", 0.0))
         self.portfolio_widget.update_portfolio(bal, open_pos, stats.get("total_realized_pnl", 0.0))
 
+        # Instant cold-start ticker fetch (<500ms)
+        try:
+            initial_prices = {}
+            for sym in ("BTC/USD", "ETH/USD", "SOL/USD"):
+                try:
+                    t = await self.market_client.get_ticker(sym)
+                    initial_prices[sym] = t
+                except Exception:
+                    pass
+            if initial_prices:
+                self.price_feed.update_prices(initial_prices)
+        except Exception as pe:
+            logger.debug(f"Initial ticker fetch error: {pe}")
+
         # Start periodic tasks
         self._scan_task = asyncio.create_task(self._scan_loop())
         self._monitor_task = asyncio.create_task(self._price_and_position_monitor())
 
         # Trigger immediate initial scan
         asyncio.create_task(self._execute_scan())
+
+    def _handle_scan_progress(self, symbol: str, stage: str, message: str) -> None:
+        """Stream live agent status to signals widget, alert panel radar, and bottom log."""
+        self.signals_widget.set_agent_activity(symbol, message)
+        self.alert_widget.set_radar_status(f"[{symbol}] {message}")
+        self.notifications_bar.add_event(f"[{symbol}] {message}", "info")
+
+    def _handle_pair_scanned(self, summary: Dict[str, Any], alert: Optional[SignalAlert]) -> None:
+        """Immediately update TUI as each asset finishes scanning (BTC first!)."""
+        sym = summary.get("symbol", "")
+        act = summary.get("action", "HOLD")
+        conf = float(summary.get("confidence", 0.50))
+        self.signals_widget.update_signal(sym, act, conf)
+
+        # Store debate data for immediate inspection
+        self._last_active_symbol = sym
+        self._last_debate_data = {
+            "bull_thesis": summary.get("bull_thesis", ""),
+            "bear_thesis": summary.get("bear_thesis", ""),
+            "synthesis": summary.get("summary", ""),
+            "technical": f"RSI: {summary.get('indicators', {}).get('rsi_14', 50):.1f}",
+            "sentiment": "Positive liquidity and momentum",
+            "fundamental": "On-chain accumulation support",
+            "risk_audit": "1.0% portfolio risk cap, strict 2:1 R:R target",
+        }
+
+        # If this pair triggered an alert, surface it immediately without waiting for other pairs
+        if alert:
+            self.active_alert = alert
+            self.alert_widget.set_alert(alert)
+            self.notifications_bar.add_event(
+                f"HIGH-CONVICTION ALERT: {alert.action.value} {alert.symbol} ({alert.confidence*100:.0f}%)",
+                "warn",
+            )
+
+        self.history_widget.refresh_signals()
 
     async def _scan_loop(self) -> None:
         """Countdown loop that triggers multi-pair scan every 300s."""
@@ -207,25 +267,14 @@ class SuperKrakenCopilotApp(App):
             await self._execute_scan()
 
     async def _execute_scan(self) -> None:
-        """Scan configured pairs, update signals table, and trigger alert if >=62% confidence."""
+        """Scan configured pairs with real-time streaming updates."""
         self.signals_widget.set_scanning(True)
-        self.notifications_bar.add_event("Running 8-agent market scan across watchlist...", "info")
+        self.notifications_bar.add_event("Starting 8-agent market scan (BTC/USD first)...", "info")
         try:
             results, alert = await self.scanner.scan_all_pairs(min_confidence=0.62)
             self.signals_widget.update_signals(results)
             self.signals_widget.set_scanning(False)
-
-            if results:
-                self._last_active_symbol = results[0]["symbol"]
-                self._last_debate_data = {
-                    "bull_thesis": results[0].get("bull_thesis", ""),
-                    "bear_thesis": results[0].get("bear_thesis", ""),
-                    "synthesis": results[0].get("summary", ""),
-                    "technical": f"RSI: {results[0].get('indicators', {}).get('rsi_14', 50):.1f}",
-                    "sentiment": "Positive liquidity and momentum",
-                    "fundamental": "On-chain accumulation support",
-                    "risk_audit": "1.0% portfolio risk cap, strict 2:1 R:R target",
-                }
+            self.alert_widget.set_radar_status("Standby — monitoring order book & candles")
 
             if alert:
                 self.active_alert = alert
