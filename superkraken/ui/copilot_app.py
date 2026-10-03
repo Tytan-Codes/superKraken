@@ -291,11 +291,17 @@ class SuperKrakenCopilotApp(App):
                             pnl_pct=pnl_pct,
                             position_id=pos.id,
                         )
-                        confirmed = await self.push_screen_wait(modal)
-                        if confirmed and pos.id:
-                            db.close_manual_position(pos.id, exit_price=cur_p, exit_reason="STOP_LOSS")
-                            self.notifications_bar.add_event(f"Stop-Loss closed for {pos.symbol}", "warn")
-                            break
+
+                        def _on_sl_confirmed(confirmed: bool) -> None:
+                            if confirmed and pos.id:
+                                db.close_manual_position(pos.id, exit_price=cur_p, exit_reason="STOP_LOSS")
+                                self.notifications_bar.add_event(f"Stop-Loss closed for {pos.symbol}", "warn")
+                                open_p = db.get_open_positions()
+                                st = db.get_copilot_performance_stats()
+                                self.portfolio_widget.update_portfolio(usdc, open_p, st.get("total_realized_pnl", 0.0))
+
+                        self.push_screen(modal, _on_sl_confirmed)
+                        break
 
                     # Check Take-Profit
                     elif pos.take_profit and (
@@ -315,11 +321,17 @@ class SuperKrakenCopilotApp(App):
                             pnl_pct=pnl_pct,
                             position_id=pos.id,
                         )
-                        confirmed = await self.push_screen_wait(modal)
-                        if confirmed and pos.id:
-                            db.close_manual_position(pos.id, exit_price=cur_p, exit_reason="TAKE_PROFIT")
-                            self.notifications_bar.add_event(f"Take-Profit locked in for {pos.symbol}!", "info")
-                            break
+
+                        def _on_tp_confirmed(confirmed: bool) -> None:
+                            if confirmed and pos.id:
+                                db.close_manual_position(pos.id, exit_price=cur_p, exit_reason="TAKE_PROFIT")
+                                self.notifications_bar.add_event(f"Take-Profit locked in for {pos.symbol}!", "info")
+                                open_p = db.get_open_positions()
+                                st = db.get_copilot_performance_stats()
+                                self.portfolio_widget.update_portfolio(usdc, open_p, st.get("total_realized_pnl", 0.0))
+
+                        self.push_screen(modal, _on_tp_confirmed)
+                        break
 
                 # 3. Evaluate pending historical signals
                 await self.scanner.evaluate_pending_signals()
@@ -379,23 +391,26 @@ class SuperKrakenCopilotApp(App):
         self.history_widget.refresh_signals()
         self.notifications_bar.add_event(f"Signal skipped: {alert.symbol} {alert.action.value}", "info")
 
-    async def action_view_debate(self) -> None:
+    def action_view_debate(self) -> None:
         """Open full 8-agent adversarial transcript modal (Hotkey [D])."""
         sym = self._last_active_symbol
         modal = DebateModal(symbol=sym, debate_data=self._last_debate_data)
-        await self.push_screen_wait(modal)
+        self.push_screen(modal)
 
-    async def action_log_trade(self) -> None:
+    def action_log_trade(self) -> None:
         """Open modal form to log trade placed on Kraken Pro (Hotkey [L])."""
         modal = LogTradeModal(default_symbol=self._last_active_symbol)
-        pos = await self.push_screen_wait(modal)
-        if pos:
-            self.notifications_bar.add_event(f"Manually logged: {pos.side} {pos.symbol} ({pos.position_size} units)", "info")
-            open_pos = db.get_open_positions()
-            usdc = await self.scanner.get_live_portfolio_usdc()
-            stats = db.get_copilot_performance_stats()
-            self.header_widget.update_metrics(usdc, len(open_pos), stats.get("total_realized_pnl", 0.0))
-            self.portfolio_widget.update_portfolio(usdc, open_pos, stats.get("total_realized_pnl", 0.0))
+
+        def _on_trade_logged(pos: Optional[TrackedPosition]) -> None:
+            if pos:
+                self.notifications_bar.add_event(f"Manually logged: {pos.side} {pos.symbol} ({pos.position_size} units)", "info")
+                open_pos = db.get_open_positions()
+                usdc = self.scanner.cached_portfolio_usdc
+                stats = db.get_copilot_performance_stats()
+                self.header_widget.update_metrics(usdc, len(open_pos), stats.get("total_realized_pnl", 0.0))
+                self.portfolio_widget.update_portfolio(usdc, open_pos, stats.get("total_realized_pnl", 0.0))
+
+        self.push_screen(modal, _on_trade_logged)
 
     async def action_close_position(self) -> None:
         """Quick close latest open position if any."""
