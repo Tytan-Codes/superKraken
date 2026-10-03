@@ -1,7 +1,7 @@
 """Agent signals summary widget displaying current signal per pair and scan countdown timer."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
@@ -28,6 +28,22 @@ class AgentSignalsWidget(Static):
             "confidence": confidence,
             "time": now_str,
         }
+        self.refresh()
+
+    def update_signals(self, results: List[Dict[str, Any]]) -> None:
+        for r in results:
+            sym = r.get("symbol", "")
+            act = r.get("action", "HOLD")
+            conf = float(r.get("confidence", 0.50))
+            self.update_signal(sym, act, conf)
+        self.refresh()
+
+    def update_scan_timer(self, seconds_left: int) -> None:
+        self.seconds_until_next_scan = max(0, seconds_left)
+        self.refresh()
+
+    def set_scanning(self, is_scanning: bool) -> None:
+        self.is_scanning = is_scanning
         self.refresh()
 
     def update_countdown(self, seconds_left: int, is_scanning: bool = False) -> None:
@@ -59,7 +75,7 @@ class AgentSignalsWidget(Static):
         mins = self.seconds_until_next_scan // 60
         secs = self.seconds_until_next_scan % 60
         if self.is_scanning:
-            status_text = Text("⠸ Scanning agents now...", style="bold cyan")
+            status_text = Text("⠸ Scanning agents...", style="bold cyan")
         else:
             status_text = Text(f"⏱️ Next scan: {mins}:{secs:02d}", style="dim cyan")
 
