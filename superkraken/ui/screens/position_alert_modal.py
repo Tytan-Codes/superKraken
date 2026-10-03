@@ -2,7 +2,7 @@
 
 import sys
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
@@ -13,7 +13,7 @@ class PositionAlertModal(ModalScreen[bool]):
     DEFAULT_CSS = """
     PositionAlertModal {
         align: center middle;
-        background: rgba(0, 0, 0, 0.85);
+        background: rgba(0, 0, 0, 0.90);
     }
 
     #alert-dialog {
@@ -21,7 +21,6 @@ class PositionAlertModal(ModalScreen[bool]):
         max-width: 90;
         height: auto;
         padding: 2 3;
-        border: heavy $error;
         background: #161b22;
     }
 
@@ -48,12 +47,6 @@ class PositionAlertModal(ModalScreen[bool]):
         height: auto;
     }
 
-    #alert-action {
-        text-align: center;
-        margin: 1 0;
-        text-style: bold;
-    }
-
     #btn-container {
         align: center middle;
         margin-top: 1;
@@ -66,9 +59,10 @@ class PositionAlertModal(ModalScreen[bool]):
     """
 
     BINDINGS = [
-        ("escape", "dismiss_modal", "Dismiss"),
-        ("c", "confirm_close", "Confirm Closed"),
-        ("enter", "confirm_close", "Confirm Closed"),
+        ("c", "confirm_close", "Mark as closed"),
+        ("enter", "confirm_close", "Mark as closed"),
+        ("i", "dismiss_modal", "Keep monitoring"),
+        ("escape", "dismiss_modal", "Keep monitoring"),
     ]
 
     def __init__(
@@ -106,32 +100,42 @@ class PositionAlertModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         is_sl = "STOP" in self.alert_type
         border_class = "stop-loss-border" if is_sl else "take-profit-border"
-        title_color = "bold red" if is_sl else "bold green"
-        title_icon = "🛑" if is_sl else "🎯"
-        title_text = "STOP-LOSS HIT — ACTION REQUIRED" if is_sl else "TAKE-PROFIT TARGET HIT — LOCK IN GAINS"
+        coin = self.symbol.split("/")[0]
+
+        if is_sl:
+            title_text = f"🚨 YOUR POSITION NEEDS ATTENTION — {self.symbol}"
+            title_style = "bold red"
+            dialog_body = (
+                f"[bold red]{coin} just hit your STOP-LOSS level.[/bold red]\n\n"
+                f"You bought {coin} at ${self.entry_price:,.2f}.\n"
+                f"Your stop was at ${self.target_price:,.2f}.\n"
+                f"Price is now at [bold red]${self.current_price:,.2f}[/bold red] — below your stop.\n\n"
+                f"[bold yellow]You should close this trade RIGHT NOW on Kraken Pro.[/bold yellow]\n"
+                f"If you close now your loss is about [bold red]${abs(self.pnl_usd):,.2f} USDC[/bold red] ({self.pnl_pct:+.2f}%).\n"
+                f"That is exactly what you planned for — this is fine.\n\n"
+                f"[bold white]Go to Kraken Pro → Positions → Close {coin}[/bold white]"
+            )
+        else:
+            title_text = f"🎯 TARGET HIT — LOCK IN GAINS — {self.symbol}"
+            title_style = "bold green"
+            dialog_body = (
+                f"[bold green]{coin} just hit your TAKE-PROFIT target![/bold green]\n\n"
+                f"You bought {coin} at ${self.entry_price:,.2f}.\n"
+                f"Your target was at ${self.target_price:,.2f}.\n"
+                f"Price reached [bold green]${self.current_price:,.2f}[/bold green] — target reached.\n\n"
+                f"[bold yellow]You should close this trade RIGHT NOW on Kraken Pro to lock in profit.[/bold yellow]\n"
+                f"If you close now your gain is about [bold green]+${abs(self.pnl_usd):,.2f} USDC[/bold green] ({self.pnl_pct:+.2f}%).\n"
+                f"Great trade — take your profit off the table.\n\n"
+                f"[bold white]Go to Kraken Pro → Positions → Close {coin}[/bold white]"
+            )
 
         with Container(id="alert-dialog", classes=border_class):
-            yield Static(f"[{title_color}]{title_icon}  {title_text}  {title_icon}[/]", id="alert-title")
-            
-            details_text = (
-                f"[bold cyan]Asset:[/bold cyan] {self.symbol}     "
-                f"[bold cyan]Size:[/bold cyan] {self.position_size:,.4f} units\n"
-                f"[bold]Entry Price:[/bold]  ${self.entry_price:,.2f}\n"
-                f"[bold]Trigger Price:[/bold] ${self.target_price:,.2f}\n"
-                f"[bold]Current Price:[/bold] ${self.current_price:,.2f}\n"
-                f"[bold]Unrealized P&L:[/bold] [{'red' if self.pnl_usd < 0 else 'green'}]"
-                f"${self.pnl_usd:+,.2f} ({self.pnl_pct:+.2f}%)[/]\n\n"
-                f"[bold yellow]INSTRUCTIONS FOR KRAKEN PRO:[/bold yellow]\n"
-                f"1. Open Kraken Pro terminal or mobile app immediately.\n"
-                f"2. Navigate to [bold]{self.symbol}[/bold] spot market.\n"
-                f"3. Place a [bold]{'MARKET SELL' if is_sl else 'LIMIT SELL'}[/bold] order for {self.position_size:,.4f} {self.symbol.split('/')[0]}.\n"
-                f"4. Press [bold green][Enter][/bold green] or click [bold green]'Mark as Closed'[/bold green] below once executed."
-            )
-            yield Static(details_text, id="alert-details")
+            yield Static(f"[{title_style}]{title_text}[/{title_style}]", id="alert-title")
+            yield Static(dialog_body, id="alert-details")
 
             with Horizontal(id="btn-container"):
-                yield Button("Mark Position Closed [Enter]", variant="success", id="btn-close")
-                yield Button("Dismiss Warning [Esc]", variant="error", id="btn-dismiss")
+                yield Button("Mark as closed [C]", variant="success", id="btn-close")
+                yield Button("Keep monitoring (risky) [I]", variant="error", id="btn-dismiss")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-close":

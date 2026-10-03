@@ -652,34 +652,24 @@ def scan(
 
             act = res.get("action", "HOLD")
             conf = res.get("confidence", 0.0)
-            act_color = "bold green" if act == "BUY" else ("bold red" if act == "SELL" else "bold yellow")
-            console.print(f"[bold]{sym}[/bold] ➔ [{act_color}]{act}[/{act_color}] ({conf*100:.1f}% Confidence) | Price: ${res['current_price']:,.2f}")
-            console.print(f"  [dim]Consensus:[/] {res.get('summary')}")
+            coin = sym.split("/")[0]
 
             if alert:
-                order = alert.suggested_order
-                risk = alert.risk_metrics
-                alert_panel = (
-                    f"[{act_color}]🚨 HIGH-CONVICTION ALERT: {alert.action.value} {alert.symbol} ({alert.confidence*100:.0f}%)[/{act_color}]\n\n"
-                    f"[bold cyan]Actionable Kraken Pro Order Specification:[/bold cyan]\n"
-                    f"  • Order Type:      [bold]LIMIT {alert.action.value}[/bold]\n"
-                    f"  • Limit Price:     [bold]${order.get('limit_entry_price', 0):,.2f}[/bold]\n"
-                    f"  • Position Size:   [bold]{order.get('quantity', 0):.4f} {sym.split('/')[0]}[/bold] (${order.get('notional_usdc', 0):,.2f} USDC, {order.get('position_pct', 0)*100:.1f}% equity)\n"
-                    f"  • Stop-Loss (1.5x ATR): [bold red]${order.get('stop_loss', 0):,.2f}[/bold red] (-{order.get('stop_loss_pct', 0):.2f}%)\n"
-                    f"  • Take-Profit (2:1 R:R): [bold green]${order.get('take_profit', 0):,.2f}[/bold green] (+{order.get('take_profit_pct', 0):.2f}%)\n\n"
-                    f"[bold yellow]Exact Dollar Risk & Return Profile:[/bold yellow]\n"
-                    f"  • Max Loss:        [bold red]${risk.get('max_loss_usd', 0):,.2f} USDC[/bold red] ({risk.get('max_loss_pct', 0):.1f}% of portfolio)\n"
-                    f"  • Target Gain:     [bold green]${risk.get('target_gain_usd', 0):,.2f} USDC[/bold green] ({risk.get('target_gain_pct', 0):.1f}% of portfolio)\n"
-                    f"  • Risk/Reward:     [bold cyan]1 : {risk.get('risk_reward_ratio', 2.0):.1f}[/bold cyan]\n\n"
-                    f"[bold]Operator Execution Instructions:[/bold]\n"
-                    f"  1. Go to Kraken Pro ({alert.symbol})\n"
-                    f"  2. Place LIMIT {alert.action.value} at ${order.get('limit_entry_price', 0):,.2f}\n"
-                    f"  3. Set Stop-Loss exit order at ${order.get('stop_loss', 0):,.2f}\n"
-                    f"  4. Run [bold green]trader log-trade --symbol {alert.symbol} --side {alert.action.value} --price {order.get('entry_price', 0)} --size {order.get('quantity', 0)} --sl {order.get('stop_loss', 0)} --tp {order.get('take_profit', 0)}[/bold green]"
+                act_color = "bold green" if alert.action.value == "BUY" else "bold red"
+                console.print(Panel(
+                    alert.advisor_speech,
+                    title=f"[{act_color}]🔔 TRADING ADVISOR RECOMMENDATION — {alert.symbol}[/{act_color}]",
+                    border_style="green" if alert.action.value == "BUY" else "red",
+                    padding=(1, 2),
+                ))
+                console.print(
+                    f"[bold yellow]Your move:[/] Press [bold green][Y][/bold green] to log if executing on Kraken Pro: "
+                    f"[dim]trader log-trade --symbol {alert.symbol} --side {alert.action.value} --price {alert.suggested_order.get('entry_price', 0)} --size {alert.suggested_order.get('quantity', 0)} --sl {alert.suggested_order.get('stop_loss', 0)} --tp {alert.suggested_order.get('take_profit', 0)}[/dim]\n"
                 )
-                console.print(Panel(alert_panel, border_style="green" if act == "BUY" else "red"))
             else:
-                console.print(f"  [dim]Result: Confidence {conf*100:.0f}% did not meet {confidence*100:.0f}% alert gate.[/dim]\n")
+                act_color = "bold green" if act == "BUY" else ("bold red" if act == "SELL" else "bold yellow")
+                console.print(f"[{act_color}]🟡 {sym}[/{act_color}] — No trade right now (Confidence: {conf*100:.0f}% below 62% gate).")
+                console.print(f"  [dim]Advisor Note: The market is currently choppy or mixed. Sitting on our hands and preserving USDC is the smart move right now.[/dim]\n")
 
     asyncio.run(_do_scan())
 

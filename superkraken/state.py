@@ -218,6 +218,7 @@ class SignalAlert(BaseModel):
     bull_thesis: str = ""
     bear_thesis: str = ""
     summary: str = ""
+    advisor_speech: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     user_action: str = "PENDING"  # "PLACED", "SKIPPED", "PENDING"
     theoretical_outcome: str = "PENDING"  # "WIN", "LOSS", "PENDING"

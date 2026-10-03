@@ -15,6 +15,92 @@ from superkraken.storage.database import db
 logger = logging.getLogger(__name__)
 
 
+def build_advisor_narrative(
+    symbol: str,
+    action: str,
+    current_price: float,
+    confidence: float,
+    bull_score: float,
+    bear_score: float,
+    indicators: Dict[str, Any],
+    order_spec: Dict[str, Any],
+) -> str:
+    """Compose plain-English trading advisor speech explaining the setup, indicators, and exact Kraken steps."""
+    coin = symbol.split("/")[0]
+    rsi = float(indicators.get("rsi_14", 50.0))
+    macd = float(indicators.get("macd_histogram", 0.0))
+    trend = str(indicators.get("trend_regime", "NEUTRAL")).upper()
+
+    bull_pts = int(bull_score * 100)
+    bear_pts = int(bear_score * 100)
+
+    qty = order_spec.get("quantity", 0.0)
+    notional = order_spec.get("notional_usdc", 0.0)
+    sl = order_spec.get("stop_loss_price", 0.0)
+    tp = order_spec.get("take_profit_price", 0.0)
+    max_loss = order_spec.get("max_loss_usd", 0.0)
+    max_loss_pct = order_spec.get("max_loss_pct", 0.0)
+    target_gain = order_spec.get("target_gain_usd", 0.0)
+    target_gain_pct = order_spec.get("target_gain_pct", 0.0)
+    conf_pct = int(confidence * 100)
+
+    if rsi < 40:
+        rsi_msg = f"RSI is down around {rsi:.0f} — recovering out of oversold territory"
+    elif rsi <= 60:
+        rsi_msg = f"RSI is at {rsi:.0f} — momentum is building nicely without being overbought"
+    else:
+        rsi_msg = f"RSI is at {rsi:.0f} — strong bullish velocity"
+
+    if macd > 0:
+        macd_msg = "MACD crossed bullish with expanding positive momentum"
+    else:
+        macd_msg = "MACD histogram is curling upward toward a bullish crossover"
+
+    if "BULL" in trend or "UP" in trend:
+        trend_msg = "Price is holding firm above key moving averages — buyers are in control"
+    elif "BEAR" in trend or "DOWN" in trend:
+        trend_msg = "Price is breaking through overhead resistance"
+    else:
+        trend_msg = "Price is holding steady support on the 15m chart"
+
+    if action == "BUY":
+        return (
+            f"🟢 I think you should BUY {coin} right now.\n\n"
+            f"The setup looks good:\n"
+            f"• {rsi_msg}.\n"
+            f"• {macd_msg}.\n"
+            f"• {trend_msg}.\n"
+            f"• Order book depth shows solid buyer support.\n\n"
+            f"My bull and bear agents debated this: Bulls won {bull_pts} to {bear_pts}.\n\n"
+            f"What to do RIGHT NOW on Kraken Pro:\n"
+            f"  1. Go to kraken.com/u/trade or open Kraken Pro\n"
+            f"  2. Select {symbol} spot market\n"
+            f"  3. Buy {qty:.4f} {coin} at market (${current_price:,.2f}) (about ${notional:,.2f} of your money)\n"
+            f"  4. Set your stop-loss at ${sl:,.2f}\n"
+            f"  5. Set your take-profit at ${tp:,.2f}\n\n"
+            f"Your risk:    ${max_loss:,.2f} USDC max loss ({max_loss_pct:.1f}% of your portfolio)\n"
+            f"Your reward:  ${target_gain:,.2f} USDC if target hit ({target_gain_pct:.1f}% of your portfolio)\n"
+            f"Risk/Reward:  1:2 — this is a solid bet.\n"
+            f"Confidence:   {conf_pct}%"
+        )
+    else:
+        return (
+            f"🔴 I think you should SELL {coin} right now.\n\n"
+            f"The setup is weakening:\n"
+            f"• RSI dropped to {rsi:.0f} — sellers taking over.\n"
+            f"• MACD crossed bearish with accelerating downward pressure.\n"
+            f"• Price broke below support levels — bears are in control.\n\n"
+            f"My bull and bear agents debated this: Bears dominated {bear_pts} to {bull_pts}.\n\n"
+            f"If you are holding {coin} — consider closing your position to protect your capital.\n"
+            f"(Note: Spot shorting is not available in CA accounts).\n\n"
+            f"What to do RIGHT NOW on Kraken Pro:\n"
+            f"  1. Go to kraken.com/u/trade\n"
+            f"  2. Open your portfolio / active positions\n"
+            f"  3. Close your {coin} position at market price (${current_price:,.2f})\n\n"
+            f"Confidence: {conf_pct}%"
+        )
+
+
 class CopilotScanner:
     """Orchestrates multi-pair market scanning with live Kraken feeds and 8-agent consensus."""
 
@@ -108,6 +194,17 @@ class CopilotScanner:
                 risk_per_trade_pct=0.01,
             )
 
+            advisor_narrative = build_advisor_narrative(
+                symbol=symbol,
+                action=action_str,
+                current_price=current_price,
+                confidence=confidence,
+                bull_score=bull_score,
+                bear_score=bear_score,
+                indicators=indicators,
+                order_spec=order_spec,
+            )
+
             # Build SignalAlert
             signal_id = f"sig-{symbol.split('/')[0].lower()}-{uuid.uuid4().hex[:6]}"
             alert = SignalAlert(
@@ -147,6 +244,7 @@ class CopilotScanner:
                 bull_thesis=bull.get("thesis", "Bull thesis supported by trend"),
                 bear_thesis=bear.get("thesis", "Bear thesis notes resistance"),
                 summary=summary,
+                advisor_speech=advisor_narrative,
                 timestamp=datetime.now(timezone.utc),
             )
 
